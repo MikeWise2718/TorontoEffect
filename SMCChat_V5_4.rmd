@@ -1,0 +1,276 @@
+---
+title: "SMSChat_V5_4"
+author: "TorontoEffect"
+date: "22 Feb 2017"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Initialization
+```{r}
+### XBox Chat data
+### Data comes from Marcus Collins' scope script from .ss structured stream called ChatSessionUnified in Cosmos
+
+library(zoo,quietly=T,warn.conflicts=F)
+library(lmtest,quietly=T,warn.conflicts=F)
+library(sandwich,quietly=T,warn.conflicts=F)
+library(tidyverse,verbose=F,quietly=T,warn.conflicts=F)
+
+set.seed(1234)
+version <-5.2
+versionstring <- sprintf("Version %.1f",version)
+
+printcoef <- F   # print coeeficients - F makes output much smaller for development
+printsumm <- F   # print summaries - F makes output much smaller for development
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+tztz <- "US/Pacific"
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+fname <- "data/chat-vol-duration-features.csv"
+```
+
+# Read in and prep data
+```{r}
+mydata <- read.csv(fname)
+mydata$pbbt <- as.POSIXct(mydata$BlockBeginTime,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+datestr <- sapply(strsplit(as.character(mydata$Date)," "),'[',1) # strip out the "12:00:00 AM"
+mydata$datestr <- paste(datestr,mydata$Hour,sep=" ") # append the hour
+mydata$dt <- as.POSIXct(mydata$datestr,format="%m/%d/%Y %H",tz=tztz)
+mydata$dtd <- as.POSIXct(mydata$datestr,format="%m/%d/%Y",tz=tztz)
+
+# calculate a daynumber that goes 0-24 hours and handles leap years, DST, etc. correctly
+# we will use this to group by day
+mydata$dnum <- round(as.numeric(difftime(mydata$dtd,as.POSIXct("2015-01-01",tz=tztz),"days")),0)
+
+colnames(mydata)
+unique(mydata$Subject)
+newdata<-mydata[ order(mydata$dt), ]
+
+# restrict data to July 2016-Jan 2017
+newdata <- subset(newdata,newdata$dt >= as.POSIXct("2016-07-27",tz=tztz))
+newdata <- subset(newdata,newdata$dt < as.POSIXct("2017-01-08",tz=tztz))
+```
+
+# Utility functions
+```{r}
+addvlines <- function(){
+  abline(v=as.POSIXct("2016-10-11"),col = "red")
+  abline(v=as.POSIXct("2016-10-18"),col = "red")
+  abline(v=as.POSIXct("2016-11-01"),col = "red")
+  abline(v=as.POSIXct("2016-11-17"),col = "blue")
+  abline(v=as.POSIXct("2016-12-15"),col = "red")
+}
+sumandcoef <- function(fit){
+  if (printsumm){ summary(fit) }
+  if (printcoef){ coeftest(fit, vcov = vcovHC(fit, "HC1"))}
+}
+dailyplt <- function(x,y,mtit,xlab,ylab){
+    ymx <- max(y) + 1000
+    plot( x,y, main = mtit,xlab = xlab,ylab=ylab,ylim=c(0,ymx),pch=19 )
+    addvlines()
+}
+resplt <- function(x,y,mtit,xlab,ylab){
+    plot( x,y, main = mtit,xlab = xlab,ylab=ylab )
+    addvlines()
+}
+```
+
+# Daily Plot
+```{r}
+daily0 <- newdata %>% group_by(dnum) %>% summarize(dt=min(dt),ChatsInBlock = sum(ChatsInBlock) )
+mtit <- "Xbox A&B Chat: Raw Data Aggregated to Daily Level"
+dailyplt(daily0$dt, daily0$ChatsInBlock,mtit,"Date","Chat Initiations")
+
+#Take data POST OCT 1 and plot
+daily <- subset(daily0,daily0$dt >= as.POSIXct("2016-10-01",tz=tztz))
+dailyplt(daily$dt, daily$ChatsInBlock,mtit,"Date","Chat Initiations")
+```
+
+# Create count variable for subsequent merge
+```{r}
+daily$count <- seq(length(daily$ChatsInBlock))
+daily$count2 <- daily$count^2
+daily$count3 <- daily$count^3
+daily$count4 <- daily$count^4
+daily$count5 <- daily$count^5
+daily$count6 <- daily$count^6
+daily$count7 <- daily$count^7
+daily$count8 <- daily$count^8
+daily$count9 <- daily$count^9
+daily$count10 <- daily$count^10
+daily$dtdaily <- daily$dt
+colnames(daily)
+```
+
+# Merge daily and subset of hourly data
+```{r}
+vars <- c("dtdaily","count", "count2","count3", "count4","count5", "count6","count7","count8","count9", "count10")
+temp <- daily[vars]
+
+newdata1 <- subset(newdata,newdata$dt >= as.POSIXct("2016-10-01",tz=tztz))
+
+# Must do the same for the newdata1 dataframe
+m1 <- merge(temp,newdata1, by.x="dtdaily", by.y = "dtd")
+m1 <- m1[order(m1$dt), ]
+m1$ln_ChatsInBlock<-log(m1$ChatsInBlock)
+
+
+#Create dummies with correct initiation date for various treatments.
+m1$sky0_10 <- ifelse(m1$dt >= as.POSIXct("2016-10-11",tz=tztz),1,0)
+m1$sky10_30 <- ifelse(m1$dt >= as.POSIXct("2016-10-18",tz=tztz),1,0)
+m1$sky30_50 <- ifelse(m1$dt >= as.POSIXct("2016-11-01",tz=tztz),1,0)
+m1$content <- ifelse(m1$dt >= as.POSIXct("2016-11-17",tz=tztz),1,0)
+m1$sky50_90 <- ifelse(m1$dt >= as.POSIXct("2016-12-15",tz=tztz),1,0)
+
+#Plot of the raw data
+dailyplt(m1$dt, m1$ChatsInBlock,  "Raw Data Aggregated to Hour Level", "Date", "Chat Initiations")
+```
+
+# stargazer summary statistics
+```{r}
+library(stargazer)
+stargazer(m1[c("ChatsInBlock")], type = "text", title="Descriptive statistics", digits=1, out="Summary.txt")
+```
+
+# Chat Initiations With and without Christmas
+```{r}
+
+analyzeChatInits <- function (titphrase="",cutoff=NULL){
+  
+  if (!is.null(cutoff)){
+    mdf <- subset(m1,m1$dt < as.POSIXct(cutoff,tz=tztz))
+  } else{
+    mdf <- m1
+  }
+  mdf$Hour <- as.factor(mdf$Hour)
+  mdf$ChatDOW <- as.factor(mdf$ChatDOW)
+  mtit <- sprintf("Chat Inititiations %s",titphrase)
+
+  ##### 8TH ORDER RESIDUAL PLOT Levels
+  fit = glm(ChatsInBlock ~ Hour + ChatDOW +  
+                           count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + 
+                           sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=mdf)
+
+  ylab <-"residual (inc 8th Order polynomial, no dummies)"
+  resplt(mdf$dt, resid(fit),  mtit, "Date",ylab)
+
+  ##### 8TH ORDER RESIDUAL PLOT Levels, HOD*DOW
+  fit = glm(ChatsInBlock ~ Hour*ChatDOW + 
+                           count + count2 + count3 + count4 + count5 + count6 + count7 + count8, data=mdf)
+  resplt(mdf$dt, resid(fit),  mtit, "Date",ylab)
+  
+
+  #Main specification of 8th order Polynomial levels
+  fit = glm( ChatsInBlock ~ Hour + ChatDOW + 
+                            count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + 
+                            sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=mdf)
+  sumandcoef(fit)
+  
+  #Main specification of 8th order Polynomial logs
+  fit = glm( ln_ChatsInBlock ~ Hour + ChatDOW + 
+                               count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + 
+                               sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=mdf)
+  sumandcoef(fit)
+  
+  #Main specification of 8th order Polynomial hour by day levels, HOD*DOW
+  fit = glm( ChatsInBlock ~ Hour*ChatDOW + 
+                            count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + 
+                            sky0_10 + sky10_30 + sky30_50 + sky50_90 + content, data=mdf)
+  sumandcoef(fit)
+  
+  #Main specification of 8th order Polynomial hour by day logs, HOD*DOW
+  fit = glm(ln_ChatsInBlock ~ Hour*ChatDOW + 
+                             count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + 
+                             sky0_10 + sky10_30 + sky30_50 + sky50_90 + content, data=mdf)
+  sumandcoef(fit)
+  
+  return(mdf)
+}
+mm <- analyzeChatInits("with Christmas")
+m2 <- analyzeChatInits("without Christmas","2016-12-24")
+```
+
+# Analyze Break Residuals
+```{r}
+analyzeBreakResiduals <- function(name, brkdate, sdate, edate, plotrawdata=F) {
+  dgap <- round(difftime(edate,sdate,units="days"),0)
+  mtit  <- sprintf("%s - %d day interval - Chat Initiations",name,dgap)
+  mtitd <- sprintf("%s - %d day interval - Chat Durations",name,dgap)
+
+  mdf <- subset(m2, m2$dt >= as.POSIXct(sdate, tz = tztz))
+  mdf <- subset(mdf, mdf$dt < as.POSIXct(edate, tz = tztz))
+  mdf$pastbreak <- ifelse(mdf$dt >= brkdate, 1, 0)
+
+  #Create linear time trend before and after
+  temp_data <- mdf[c("dt","dnum", "ChatsInBlock")]
+  daily <- temp_data %>% group_by(dnum) %>% summarize(daily_time=min(dt),ChatsInBlock = sum(ChatsInBlock) )
+
+  daily$daily_time <-  as.POSIXct(daily$daily_time, format = "%Y-%m-%d",tz=tztz)
+  brkindex <- which(grepl(brkdate, daily$daily_time))
+  daily$linear1 <- seq(length(daily$ChatsInBlock))
+  daily$linear2 <- daily$linear1 - (brkindex - 1)
+  daily$linear1 <- ifelse(daily$daily_time >= brkdate, 0, daily$linear1)
+  daily$linear2 <- ifelse(daily$daily_time < brkdate, 0, daily$linear2)
+  
+  daily <- subset(daily, daily$daily_time < as.POSIXct(edate, tz = tztz))
+  mdf <- subset(mdf, mdf$dt < as.POSIXct(edate, tz = tztz))
+  
+  # Create subsets of data to merge
+  temp <- daily[c("daily_time", "linear1", "linear2")]
+  
+  #Convert to a single date variable and merge
+  mdf$date_only <- as.Date(mdf$dt, tz = tztz)
+  temp$date_only <- as.Date(temp$daily_time, tz = tztz)
+  glmdf <- merge(temp, mdf, by = "date_only")
+  
+  # prepare for GLM
+  glmdf <- glmdf[ order(glmdf$dt),]
+  glmdf$Hour <- as.factor(glmdf$Hour)
+  glmdf$ln_MeanChatDuration <-  log(glmdf$MeanChatDuration)
+  
+  ##### GLM regressions
+  glmfit = glm(ChatsInBlock ~ Hour  + linear1 + linear2 + pastbreak, data = glmdf)
+  sumandcoef(glmfit)
+  
+  glmfit = glm(ln_ChatsInBlock ~ Hour  + linear1 + linear2 + pastbreak, data = glmdf)
+  sumandcoef(glmfit)
+  
+  glmfit = glm(MeanChatDuration ~ Hour  + linear1 + linear2 + pastbreak, data = glmdf)
+  sumandcoef(glmfit)
+  
+  glmfit = glm(ln_MeanChatDuration ~ Hour  + linear1 + linear2 + pastbreak, data = glmdf)
+  sumandcoef(glmfit)
+  
+  ##### Linear RESIDUAL PLOTs 
+  ylab <- "Residual Live Chats/Hour (Unique Linear trends, no dummy)"
+  glmfit = glm(ChatsInBlock ~ Hour  + linear1 + linear2, data =glmdf)
+  resplt(glmdf$dt,resid(glmfit), mtit,"Date", ylab )
+
+  glmfit = glm(MeanChatDuration ~ Hour  + linear1 + linear2, data = glmdf)
+  resplt(glmdf$dt,resid(glmfit), mtitd,"Date", ylab )
+
+  # Optionally plot raw data
+  if (plotrawdata){
+    rawmtit <- sprintf("%s - Raw GLMdata ChatsInBLock",mtit)
+    resplt(glmdf$dt,glmdf$ChatsInBlock, rawmtit,"Date", "Chats/Hour" )
+
+    rawmtit <- sprintf("%s - Raw Daily ChatInBLock",mtit)
+    resplt(daily$daily_time,daily$ChatsInBlock, rawmtit,"Date", "Chats/Hour" )
+  }
+}
+analyzeBreakResiduals("3rd break","2016-11-01","2016-10-25","2016-11-08")
+analyzeBreakResiduals("2nd break","2016-10-18","2016-10-13","2016-10-25")
+analyzeBreakResiduals("5th break","2016-12-15","2016-12-10","2016-12-21",plotrawdata = T)
+analyzeBreakResiduals("5th break","2016-12-15","2016-12-08","2016-12-23",plotrawdata = T)
+analyzeBreakResiduals("4th break","2016-11-17","2016-11-13","2016-11-22",plotrawdata = T)
+```
+
+# Done
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```
