@@ -1,7 +1,7 @@
 ---
-title: "SMSChat_V5"
-author: "Toronto"
-date: "2017 M02 13"
+title: "SMSChat_V5_1a"
+author: "TorontoEffect"
+date: "20 Feb 2017"
 output: html_document
 ---
 
@@ -9,10 +9,10 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## R Markdown
+# Initialzation
 
 
-```{r cars}
+```{r}
 ### XBox Chat data
 ### Data comes from Marcus Collins' scope script from .ss structured stream called ChatSessionUnified in Cosmos
 
@@ -26,14 +26,30 @@ library(stringr)
 library(dplyr)
 
 
+set.seed(1234)
 
+version <- 5.1
+versionstring <- sprintf("Version %.1fa",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+tztz <- "US/Pacific"
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
 
 #setwd("C:/Users/jlariv/Documents/OneDrive for Business/Toronto/Data")
 #setwd("C:/Users/jlariv/OneDrive - Microsoft/Toronto/Data")
+fname <- "d:/local/TorontoEffect/data/chat-vol-duration-features.csv"
+```
 
+```{r c2}
+print(getwd())
+mydata <- read.csv(fname)
 
+```
 
-mydata <- read.csv("data/chat-vol-duration-features.csv")
+```{r}
+
 colnames(mydata)
 #Keep only XBox USA Chat data
 unique(mydata$Subject)
@@ -43,10 +59,10 @@ newdata$time <- str_c(newdata$Hour,"00",sep=":")
 date_parts = t(as.data.frame(strsplit(as.character(newdata$Date),' ')))
 newdata$fetcha <- date_parts[,1]
 newdata$dtt <- paste(newdata$fetcha,newdata$time)
-newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M")
+newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M",tz=tztz)
 newdata <-newdata[with(newdata, order(newdata$dt)), ]
-newdata <- subset(newdata,newdata$dt >= "2016-07-15 00:00:00")
-newdata <- subset(newdata,newdata$dt < "2017-01-08 00:00:00")
+newdata <- subset(newdata,newdata$dt >= as.POSIXct("2016-07-15 00:00:00",tz=tztz))
+newdata <- subset(newdata,newdata$dt < as.POSIXct("2017-01-08 00:00:00",tz=tztz))
 
 # with  group
 newdata_USA <- subset(newdata,CountryCode == "USA")
@@ -55,27 +71,29 @@ newdata_USA %>%   group_by(Subject) %>%   summarise_each (funs(mean, min, max, s
 
 #ag <- aggregate(. ~ Subject, mydata, function(x) c(mean = mean(ChatsInBlock), sd = sd(ChatsInBlock)))
 Xdata <- subset(mydata,Subject == "A&B - Xbox")
+```
 
 
-##################
 # Combine and Format 
-##################
+
+
+```{r}
 #utils::View(newdata)
 newdata$time <- str_c(newdata$Hour,"00",sep=":")
 date_parts = t(as.data.frame(strsplit(as.character(newdata$Date),' ')))
 newdata$fetcha <- date_parts[,1]
 newdata$dtt <- paste(newdata$fetcha,newdata$time)
-newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M")
+newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M",tz=tztz)
 newdata <-newdata[with(newdata, order(newdata$dt)), ]
-newdata <- subset(newdata,newdata$dt >= "2016-07-27 00:00:00")
-newdata <- subset(newdata,newdata$dt < "2017-01-08 00:00:00")
+newdata <- subset(newdata,newdata$dt >= as.POSIXct("2016-07-27 00:00:00",tz=tztz))
+newdata <- subset(newdata,newdata$dt < as.POSIXct("2017-01-08 00:00:00",tz=tztz))
+```
 
 
 
-
-#####################
 # Daily Plot
-#####################
+```{r}
+
 temp_data <- newdata[c("dt","ChatsInBlock")]
 daily <- aggregate(. ~ cut(temp_data$dt, "1 day"), temp_data[setdiff(names(temp_data), "dt")], sum)
 colnames(daily)[1] <- "daily_time"
@@ -118,11 +136,13 @@ abline(v=as.numeric(daily$date_formatted[sky2]),col = "red")
 abline(v=as.numeric(daily$date_formatted[sky3]),col = "red")
 abline(v=as.numeric(daily$date_formatted[content1]),col = "blue")
 abline(v=as.numeric(daily$date_formatted[sky4]),col = "red")
+```
 
-##############################
-#Create count variable for subsequent merge
-##############################
 
+
+# Create count variable for subsequent merge
+
+```{r}
 daily$count <- seq(length(daily$ChatsInBlock))
 daily$count2 <- daily$count^2
 daily$count3 <- daily$count^3
@@ -135,28 +155,30 @@ daily$count9 <- daily$count^9
 daily$count10 <- daily$count^10
 daily$dtdaily <- daily$date_formatted
 colnames(daily)
+```
 
-#########################
 # Merge daily and SUBSET of hourly data
-#########################
+
+
+```{r}
 vars <- c("dtdaily","count", "count2","count3", "count4","count5", "count6","count7","count8","count9", "count10")
 temp <- daily[vars]
 
-newdata1 <- subset(newdata,newdata$dt >= "2016-10-01 00:00:00")
+newdata1 <- subset(newdata,newdata$dt >= as.POSIXct("2016-10-01 00:00:00",tz=tztz))
 # temp$dt is formatted by as.Date from line 45: daily$date_formatted <- as.Date(daily$daily_time) and line 99: daily$dt <- daily$date_formatted
 # Must do the same for the newdata1 dataframe
 newdata1$date_only<- as.Date(newdata1$dt)
 m1 <- merge(temp,newdata1, by.x="dtdaily", by.y = "date_only")
 m1 <- m1[with(m1, order(dt)), ]
-utils::View(m1)
+#utils::view(m1)
 
 ##########################
 #Create dummies with correct initiation date for various treatments.
-m1$sky0_10 <- ifelse(m1$dt >= "2016-10-11 00:00:00",1,0)
-m1$sky10_30 <- ifelse(m1$dt >= "2016-10-18 00:00:00",1,0)
-m1$sky30_50 <- ifelse(m1$dt >= "2016-11-01 00:00:00",1,0)
-m1$content <- ifelse(m1$dt >= "2016-11-17 00:00:00",1,0)
-m1$sky50_90 <- ifelse(m1$dt >= "2016-12-15 00:00:00",1,0)
+m1$sky0_10 <- ifelse(m1$dt >= as.POSIXct("2016-10-11 00:00:00",tz=tztz),1,0)
+m1$sky10_30 <- ifelse(m1$dt >= as.POSIXct("2016-10-18 00:00:00",tz=tztz),1,0)
+m1$sky30_50 <- ifelse(m1$dt >= as.POSIXct("2016-11-01 00:00:00",tz=tztz),1,0)
+m1$content <- ifelse(m1$dt >= as.POSIXct("2016-11-17 00:00:00",tz=tztz),1,0)
+m1$sky50_90 <- ifelse(m1$dt >= as.POSIXct("2016-12-15 00:00:00",tz=tztz),1,0)
 #####
 #Location in column where rollout occurs
 sky1<-which(grepl("2016-10-11 00:00:00", m1$dt))
@@ -174,35 +196,40 @@ abline(v=as.numeric(m1$dt[sky2]),col = "red")
 abline(v=as.numeric(m1$dt[sky3]),col = "red")
 abline(v=as.numeric(m1$dt[sky4]),col = "red")
 abline(v=as.numeric(m1$dt[content1]),col = "blue")
+```
 
-#stargazer will help with tables and display of data
+
+
+# stargazer will help with tables and display of data
+
+```{r}
 library(stargazer)
 #Table of summary statistics
 stargazer(m1[c("ChatsInBlock")], type = "text", title="Descriptive statistics", digits=1, out="Summary.txt")
-utils::View(m1)
+#utils::View(m1)
 
 m1$ln_ChatsInBlock<-log(m1$ChatsInBlock)
 
 #Main specification of 8th order Polynomial levels
 reg_poly5_full = glm(ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m1)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 #Main specification of 8th order Polynomial logs
 reg_poly5_full = glm(ln_ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m1)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 
 #Main specification of 8th order Polynomial hour by day levels, HOD*DOW
 reg_poly5_full = glm(ChatsInBlock ~ as.factor(Hour)*as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m1)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 #Main specification of 8th order Polynomial hour by day logs, HOD*DOW
 reg_poly5_full = glm(ln_ChatsInBlock ~ as.factor(Hour)*as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m1)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 
 ##### 8TH ORDER RESIDUAL PLOT
@@ -224,12 +251,14 @@ abline(v=as.numeric(m1$dt[sky2]),col = "red")
 abline(v=as.numeric(m1$dt[sky3]),col = "red")
 abline(v=as.numeric(m1$dt[sky4]),col = "red")
 abline(v=as.numeric(m1$dt[content1]),col = "blue")
+```
 
 
-#########################################
+
 # No Christmas
-######################################
-m2<-subset(m1,m1$dt < "2016-12-24 00:00:00")
+
+```{r}
+m2<-subset(m1,m1$dt < as.POSIXct("2016-12-24 00:00:00",tz=tztz))
 ##### 8TH ORDER RESIDUAL PLOT Levels
 reg_hourly_resid_poly8 = glm(ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 + count8, data=m2)
 m2$hourly_resid_poly8 <- resid(reg_hourly_resid_poly8)
@@ -253,24 +282,24 @@ abline(v=as.numeric(m1$dt[content1]),col = "blue")
 
 #Main specification of 8th order Polynomial levels
 reg_poly5_full = glm(ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m2)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 #Main specification of 8th order Polynomial logs
 reg_poly5_full = glm(ln_ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m2)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 
 #Main specification of 8th order Polynomial hour by day levels, HOD*DOW
 reg_poly5_full = glm(ChatsInBlock ~ as.factor(Hour)*as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m2)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 #Main specification of 8th order Polynomial hour by day logs, HOD*DOW
 reg_poly5_full = glm(ln_ChatsInBlock ~ as.factor(Hour)*as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 +count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m2)
-summary(reg_poly5_full)
-coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
+#summary(reg_poly5_full)
+#coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 
 ##################################################
 
@@ -282,7 +311,9 @@ coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 #8th order Polynomial with early month
 #reg_poly6_early_full = glm(ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 + count8 + sky0_10 + sky10_30 + sky30_50 + sky50_90 +content, data=m2)
 #summary(reg_poly6_early_full)
-#coeftest(reg_poly6_early_full, vcov = vcovHC(reg_poly6_early_full, "HC1"))
+##coeftest(reg_poly6_early_full, vcov = vcovHC(reg_poly6_early_full, "HC1"))
+```
+
 
 
 ######################################
@@ -295,16 +326,19 @@ coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 #m1$sky50_90 <- ifelse(m1$dt >= "2016-12-15 00:00:00",1,0)
 ###########################
 
+
+
 ###############################
 # Choose one week on either side of these breaks
 #
 # Third break
 ###############################
 
+```{r}
 break3<-"2016-11-01 00:00:00"
 break3_date <- "2016-11-01"
-msky3 <-subset(m2,m2$dt >= "2016-10-25 00:00:00")
-msky3 <-subset(msky3,msky3$dt < "2016-11-08 00:00:00")
+msky3 <-subset(m2,m2$dt >= as.POSIXct("2016-10-25 00:00:00",tz=tztz))
+msky3 <-subset(msky3,msky3$dt < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
 msky3$sky30_50 <- ifelse(msky3$dt >= break3,1,0)
 
 
@@ -322,41 +356,41 @@ daily$linear1 <- ifelse(daily$daily_time >= break3,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break3,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-11-08 00:00:00")
-msky3 <-subset(msky3,msky3$dt < "2016-11-08 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
+msky3 <-subset(msky3,msky3$dt < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
 temp <- daily[vars]
 
 #Convert to a single date variable
-msky3$date_only<- as.Date(msky3$dt, tz = "America/Los_Angeles")
-utils::View(msky3)
-temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
+msky3$date_only<- as.Date(msky3$dt, tz = tztz)
+#utils::view(msky3)
+temp$date_only<- as.Date(temp$daily_time, tz = tztz)
 msky3_linear <- merge(temp,msky3, by= "date_only")
 msky3_linear <- msky3_linear[with(msky3_linear, order(dt)), ]
-utils::View(msky3_linear)
+#utils::view(msky3_linear)
 
 ##### Linear regression
 reg_linear_sky3 = glm(ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky30_50 , data=msky3_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(ln_ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky30_50 , data=msky3_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky30_50 , data=msky3_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 msky3_linear$ln_MeanChatDuration<-log(msky3_linear$MeanChatDuration)
 ##### Linear regression
 reg_linear_sky3 = glm(ln_MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky30_50 , data=msky3_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear RESIDUAL PLOT on SKy3
 sky3_only<-which(grepl("2016-11-01 00:00:00", msky3_linear$dt))
@@ -372,7 +406,23 @@ reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2, da
 msky3_linear$resid_linear_sky3 <- resid(reg_linear_sky3)
 plot(msky3_linear$dt, msky3_linear$resid_linear_sky3,  main = "Chat Initiations", xlab = "Date", ylab = "Residual Chat Duration (Unique Linear trends, no dummy)")
 abline(v=as.numeric(msky3_linear$dt[sky3_only]),col = "red")
-
+# set.seed(1234)
+# nrow(m1)
+# colnames(m1)
+# sample_n(m1,20)
+# set.seed(1234)
+# nrow(m2)
+# colnames(m2)
+# sample_n(m2,20)
+# set.seed(1234)
+# nrow(msky3)
+# colnames(msky3)
+# sample_n(msky3,20)
+# set.seed(1234)
+# nrow(msky3_linear)
+# colnames(msky3_linear)
+# sample_n(msky3_linear,20)
+```
 
 
 ###############################
@@ -380,11 +430,13 @@ abline(v=as.numeric(msky3_linear$dt[sky3_only]),col = "red")
 # #m1$sky10_30 <- ifelse(m1$dt >= "2016-10-18 00:00:00",1,0)
 ###############################
 
+
+```{r}
 # Second break
 break2<-"2016-10-18 00:00:00"
 break2_date<-"2016-10-18"
-msky2 <-subset(m2,m2$dt >= "2016-10-13 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-10-25 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-10-13 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-10-25 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -402,8 +454,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-10-23 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-10-23 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-10-23 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-10-23 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -411,32 +463,32 @@ temp <- daily[vars]
 
 #Convert to a single date variable
 msky2$date_only<- as.Date(msky2$dt, tz = "America/Los_Angeles")
-utils::View(msky2)
+#utils::view(msky2)
 temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
 msky2_linear <- merge(temp,msky2, by= "date_only")
 msky2_linear <- msky2_linear[with(msky2_linear, order(dt)), ]
-utils::View(msky2_linear)
+#utils::view(msky2_linear)
 
 ##### Linear regression
 reg_linear_sky3 = glm(ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky10_30, data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(ln_ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky10_30 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky10_30 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 msky2_linear$ln_MeanChatDuration<-log(msky2_linear$MeanChatDuration)
 ##### Linear regression
 reg_linear_sky3 = glm(ln_MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky10_30 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear RESIDUAL PLOT on SKy2
 sky2_only<-which(grepl("2016-10-18 00:00:00", msky2_linear$dt))
@@ -452,7 +504,7 @@ reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2, da
 msky2_linear$resid_linear_sky3 <- resid(reg_linear_sky3)
 plot(msky2_linear$dt, msky2_linear$resid_linear_sky3,  main = "Chat Durations", xlab = "Date", ylab = "Residual Chat Duration (Unique Linear trends, no dummy)")
 abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
-
+```
 
 ########################################
 
@@ -461,11 +513,12 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 # #m1$sky50_90 <- ifelse(m1$dt >= "2016-12-15 00:00:00",1,0)
 ###############################
 
+```{r}
 # Second break
 break2<-"2016-12-15 00:00:00"
 break2_date<-"2016-12-15"
-msky2 <-subset(m2,m2$dt >= "2016-12-10 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-21 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-12-10 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-21 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -483,8 +536,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-12-20 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-20 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-12-20 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-20 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -492,32 +545,32 @@ temp <- daily[vars]
 
 #Convert to a single date variable
 msky2$date_only<- as.Date(msky2$dt, tz = "America/Los_Angeles")
-utils::View(msky2)
+#utils::view(msky2)
 temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
 msky2_linear <- merge(temp,msky2, by= "date_only")
 msky2_linear <- msky2_linear[with(msky2_linear, order(dt)), ]
-utils::View(msky2_linear)
+#utils::view(msky2_linear)
 
 ##### Linear regression
 reg_linear_sky3 = glm(ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky50_90, data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(ln_ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 msky2_linear$ln_MeanChatDuration<-log(msky2_linear$MeanChatDuration)
 ##### Linear regression
 reg_linear_sky3 = glm(ln_MeanChatDuration ~ as.factor(Hour)  + linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear RESIDUAL PLOT on SKy2
 sky2_only<-which(grepl("2016-12-15 00:00:00", msky2_linear$dt))
@@ -537,7 +590,7 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 #Raw Data
 plot(msky2_linear$dt, msky2_linear$ChatsInBlock,  main = "Chat Initiations", xlab = "Date", ylab = "Chats/Hour")
 abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
-
+```
 
 ##################
 #  Full week around Dec 15 for DOW FEs
@@ -548,11 +601,12 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 # #m1$sky50_90 <- ifelse(m1$dt >= "2016-12-15 00:00:00",1,0)
 ###############################
 
+```{r}
 # Second break
 break2<-"2016-12-15 00:00:00"
 break2_date<-"2016-12-15"
-msky2 <-subset(m2,m2$dt >= "2016-12-08 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-23 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-12-08 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -570,8 +624,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-12-23 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-23 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -579,32 +633,32 @@ temp <- daily[vars]
 
 #Convert to a single date variable
 msky2$date_only<- as.Date(msky2$dt, tz = "America/Los_Angeles")
-utils::View(msky2)
+#utils::view(msky2)
 temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
 msky2_linear <- merge(temp,msky2, by= "date_only")
 msky2_linear <- msky2_linear[with(msky2_linear, order(dt)), ]
-utils::View(msky2_linear)
+#utils::view(msky2_linear)
 
 ##### Linear regression
 reg_linear_sky3 = glm(ChatsInBlock ~ as.factor(Hour) + ChatDOW + linear1+ linear2+ sky50_90, data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(ln_ChatsInBlock ~ as.factor(Hour)  + ChatDOW +linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)  + ChatDOW +linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 msky2_linear$ln_MeanChatDuration<-log(msky2_linear$MeanChatDuration)
 ##### Linear regression
 reg_linear_sky3 = glm(ln_MeanChatDuration ~ as.factor(Hour)  + ChatDOW +linear1+ linear2+ sky50_90 , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear RESIDUAL PLOT on SKy2
 sky2_only<-which(grepl("2016-12-15 00:00:00", msky2_linear$dt))
@@ -624,20 +678,20 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 #Raw Data
 plot(msky2_linear$dt, msky2_linear$ChatsInBlock,  main = "Chat Initiations", xlab = "Date", ylab = "Chats/Hour")
 abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
-
+```
 
 
 #############################
 #####  Content Change
-# m1$dum4 <- ifelse(m1$dt >= "2016-11-17 00:00:00",1,0)
+#m1$dum4 <- ifelse(m1$dt >= "2016-11-17 00:00:00",1,0)
 #############################
 
-
+```{r}
 # Second break
 break2<-"2016-11-17 00:00:00"
 break2_date<-"2016-11-17"
-msky2 <-subset(m2,m2$dt >= "2016-11-13 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-11-22 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-11-13 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-11-22 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -655,8 +709,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-11-21 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-11-21 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-11-21 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-11-21 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -664,32 +718,32 @@ temp <- daily[vars]
 
 #Convert to a single date variable
 msky2$date_only<- as.Date(msky2$dt, tz = "America/Los_Angeles")
-utils::View(msky2)
+#utils::view(msky2)
 temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
 msky2_linear <- merge(temp,msky2, by= "date_only")
 msky2_linear <- msky2_linear[with(msky2_linear, order(dt)), ]
-utils::View(msky2_linear)
+#utils::view(msky2_linear)
 
 ##### Linear regression
 reg_linear_sky3 = glm(ChatsInBlock ~ as.factor(Hour) +  linear1+ linear2+ content, data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(ln_ChatsInBlock ~ as.factor(Hour)  + linear1+ linear2+ content , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear regression
 reg_linear_sky3 = glm(MeanChatDuration ~ as.factor(Hour)   +linear1+ linear2+ content , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 msky2_linear$ln_MeanChatDuration<-log(msky2_linear$MeanChatDuration)
 ##### Linear regression
 reg_linear_sky3 = glm(ln_MeanChatDuration ~ as.factor(Hour)   +linear1+ linear2+ content , data=msky2_linear)
-summary(reg_linear_sky3)
-coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
+#summary(reg_linear_sky3)
+#coeftest(reg_linear_sky3, vcov = vcovHC(reg_linear_sky3, "HC1"))
 
 ##### Linear RESIDUAL PLOT on SKy2
 sky2_only<-which(grepl("2016-11-17 00:00:00", msky2_linear$dt))
@@ -713,14 +767,14 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 #Raw Data
 plot(daily$daily_time, daily$ChatsInBlock,  main = "Chat Initiations", xlab = "Date", ylab = "Chats/Hour")
 abline(v=as.numeric(daily$daily_time["2016-11-17"]),col = "red")
+```
 
 
 #############################
 #####  Changes in volume by week
 #############################
 
-
-
-
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
 ```
-

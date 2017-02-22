@@ -1,0 +1,27 @@
+---
+title: "test"
+author: "johndoe"
+date: "September 5, 2015"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r title, results='asis'}
+library(pander)
+hds <- "My header"
+pandoc.header(hds, level = 2)
+```
+```{r}
+summary(cars)
+```
+
+## Including Plots
+
+
+```{r}
+
+```

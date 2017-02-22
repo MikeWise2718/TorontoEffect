@@ -1,7 +1,7 @@
 ---
 title: "SMSChat_V5"
 author: "Toronto"
-date: "2017 M02 13"
+date: "17 Feb 2017"
 output: html_document
 ---
 
@@ -33,15 +33,23 @@ versionstring <- sprintf("Version %.1f",version)
 
 starttime <- Sys.time()
 startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+tztz <- "US/Pacific"
 
 print(sprintf("%s created on %s",versionstring,startfmttime))
 
 #setwd("C:/Users/jlariv/Documents/OneDrive for Business/Toronto/Data")
 #setwd("C:/Users/jlariv/OneDrive - Microsoft/Toronto/Data")
-fname <- "data/chat-vol-duration-features.csv"
+fname <- "d:/local/TorontoEffect/data/chat-vol-duration-features.csv"
+```
 
-
+```{r c2}
+print(getwd())
 mydata <- read.csv(fname)
+
+```
+
+```{r}
+
 colnames(mydata)
 #Keep only XBox USA Chat data
 unique(mydata$Subject)
@@ -51,10 +59,10 @@ newdata$time <- str_c(newdata$Hour,"00",sep=":")
 date_parts = t(as.data.frame(strsplit(as.character(newdata$Date),' ')))
 newdata$fetcha <- date_parts[,1]
 newdata$dtt <- paste(newdata$fetcha,newdata$time)
-newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M")
+newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M",tz=tztz)
 newdata <-newdata[with(newdata, order(newdata$dt)), ]
-newdata <- subset(newdata,newdata$dt >= "2016-07-15 00:00:00")
-newdata <- subset(newdata,newdata$dt < "2017-01-08 00:00:00")
+newdata <- subset(newdata,newdata$dt >= as.POSIXct("2016-07-15 00:00:00",tz=tztz))
+newdata <- subset(newdata,newdata$dt < as.POSIXct("2017-01-08 00:00:00",tz=tztz))
 
 # with  group
 newdata_USA <- subset(newdata,CountryCode == "USA")
@@ -75,10 +83,10 @@ newdata$time <- str_c(newdata$Hour,"00",sep=":")
 date_parts = t(as.data.frame(strsplit(as.character(newdata$Date),' ')))
 newdata$fetcha <- date_parts[,1]
 newdata$dtt <- paste(newdata$fetcha,newdata$time)
-newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M")
+newdata$dt <- as.POSIXct(newdata$dtt, format = "%m/%d/%Y %H:%M",tz=tztz)
 newdata <-newdata[with(newdata, order(newdata$dt)), ]
-newdata <- subset(newdata,newdata$dt >= "2016-07-27 00:00:00")
-newdata <- subset(newdata,newdata$dt < "2017-01-08 00:00:00")
+newdata <- subset(newdata,newdata$dt >= as.POSIXct("2016-07-27 00:00:00",tz=tztz))
+newdata <- subset(newdata,newdata$dt < as.POSIXct("2017-01-08 00:00:00",tz=tztz))
 ```
 
 
@@ -156,7 +164,7 @@ colnames(daily)
 vars <- c("dtdaily","count", "count2","count3", "count4","count5", "count6","count7","count8","count9", "count10")
 temp <- daily[vars]
 
-newdata1 <- subset(newdata,newdata$dt >= "2016-10-01 00:00:00")
+newdata1 <- subset(newdata,newdata$dt >= as.POSIXct("2016-10-01 00:00:00",tz=tztz))
 # temp$dt is formatted by as.Date from line 45: daily$date_formatted <- as.Date(daily$daily_time) and line 99: daily$dt <- daily$date_formatted
 # Must do the same for the newdata1 dataframe
 newdata1$date_only<- as.Date(newdata1$dt)
@@ -166,11 +174,11 @@ utils::View(m1)
 
 ##########################
 #Create dummies with correct initiation date for various treatments.
-m1$sky0_10 <- ifelse(m1$dt >= "2016-10-11 00:00:00",1,0)
-m1$sky10_30 <- ifelse(m1$dt >= "2016-10-18 00:00:00",1,0)
-m1$sky30_50 <- ifelse(m1$dt >= "2016-11-01 00:00:00",1,0)
-m1$content <- ifelse(m1$dt >= "2016-11-17 00:00:00",1,0)
-m1$sky50_90 <- ifelse(m1$dt >= "2016-12-15 00:00:00",1,0)
+m1$sky0_10 <- ifelse(m1$dt >= as.POSIXct("2016-10-11 00:00:00",tz=tztz),1,0)
+m1$sky10_30 <- ifelse(m1$dt >= as.POSIXct("2016-10-18 00:00:00",tz=tztz),1,0)
+m1$sky30_50 <- ifelse(m1$dt >= as.POSIXct("2016-11-01 00:00:00",tz=tztz),1,0)
+m1$content <- ifelse(m1$dt >= as.POSIXct("2016-11-17 00:00:00",tz=tztz),1,0)
+m1$sky50_90 <- ifelse(m1$dt >= as.POSIXct("2016-12-15 00:00:00",tz=tztz),1,0)
 #####
 #Location in column where rollout occurs
 sky1<-which(grepl("2016-10-11 00:00:00", m1$dt))
@@ -250,7 +258,7 @@ abline(v=as.numeric(m1$dt[content1]),col = "blue")
 # No Christmas
 
 ```{r}
-m2<-subset(m1,m1$dt < "2016-12-24 00:00:00")
+m2<-subset(m1,m1$dt < as.POSIXct("2016-12-24 00:00:00",tz=tztz))
 ##### 8TH ORDER RESIDUAL PLOT Levels
 reg_hourly_resid_poly8 = glm(ChatsInBlock ~ as.factor(Hour) + as.factor(ChatDOW) + count + count2 + count3 + count4 + count5 + count6 + count7 + count8, data=m2)
 m2$hourly_resid_poly8 <- resid(reg_hourly_resid_poly8)
@@ -329,8 +337,8 @@ coeftest(reg_poly5_full, vcov = vcovHC(reg_poly5_full, "HC1"))
 ```{r}
 break3<-"2016-11-01 00:00:00"
 break3_date <- "2016-11-01"
-msky3 <-subset(m2,m2$dt >= "2016-10-25 00:00:00")
-msky3 <-subset(msky3,msky3$dt < "2016-11-08 00:00:00")
+msky3 <-subset(m2,m2$dt >= as.POSIXct("2016-10-25 00:00:00",tz=tztz))
+msky3 <-subset(msky3,msky3$dt < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
 msky3$sky30_50 <- ifelse(msky3$dt >= break3,1,0)
 
 
@@ -348,17 +356,17 @@ daily$linear1 <- ifelse(daily$daily_time >= break3,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break3,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-11-08 00:00:00")
-msky3 <-subset(msky3,msky3$dt < "2016-11-08 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
+msky3 <-subset(msky3,msky3$dt < as.POSIXct("2016-11-08 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
 temp <- daily[vars]
 
 #Convert to a single date variable
-msky3$date_only<- as.Date(msky3$dt, tz = "America/Los_Angeles")
+msky3$date_only<- as.Date(msky3$dt, tz = tztz)
 utils::View(msky3)
-temp$date_only<- as.Date(temp$daily_time, tz = "America/Los_Angeles")
+temp$date_only<- as.Date(temp$daily_time, tz = tztz)
 msky3_linear <- merge(temp,msky3, by= "date_only")
 msky3_linear <- msky3_linear[with(msky3_linear, order(dt)), ]
 utils::View(msky3_linear)
@@ -411,8 +419,8 @@ abline(v=as.numeric(msky3_linear$dt[sky3_only]),col = "red")
 # Second break
 break2<-"2016-10-18 00:00:00"
 break2_date<-"2016-10-18"
-msky2 <-subset(m2,m2$dt >= "2016-10-13 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-10-25 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-10-13 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-10-25 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -430,8 +438,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-10-23 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-10-23 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-10-23 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-10-23 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -493,8 +501,8 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 # Second break
 break2<-"2016-12-15 00:00:00"
 break2_date<-"2016-12-15"
-msky2 <-subset(m2,m2$dt >= "2016-12-10 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-21 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-12-10 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-21 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -512,8 +520,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-12-20 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-20 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-12-20 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-20 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -581,8 +589,8 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 # Second break
 break2<-"2016-12-15 00:00:00"
 break2_date<-"2016-12-15"
-msky2 <-subset(m2,m2$dt >= "2016-12-08 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-23 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-12-08 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -600,8 +608,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-12-23 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-12-23 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-12-23 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
@@ -666,8 +674,8 @@ abline(v=as.numeric(msky2_linear$dt[sky2_only]),col = "red")
 # Second break
 break2<-"2016-11-17 00:00:00"
 break2_date<-"2016-11-17"
-msky2 <-subset(m2,m2$dt >= "2016-11-13 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-11-22 00:00:00")
+msky2 <-subset(m2,m2$dt >= as.POSIXct("2016-11-13 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-11-22 00:00:00",tz=tztz))
 msky2$sky10_30 <- ifelse(msky2$dt >= break2,1,0)
 
 
@@ -685,8 +693,8 @@ daily$linear1 <- ifelse(daily$daily_time >= break2,0,daily$linear1)
 daily$linear2 <- ifelse(daily$daily_time < break2,0,daily$linear2)
 
 #Daylight savings time for this break makes things a bit odd to deal with so must drop extra dates
-daily <-subset(daily,daily$daily_time < "2016-11-21 00:00:00")
-msky2 <-subset(msky2,msky2$dt < "2016-11-21 00:00:00")
+daily <-subset(daily,daily$daily_time < as.POSIXct("2016-11-21 00:00:00",tz=tztz))
+msky2 <-subset(msky2,msky2$dt < as.POSIXct("2016-11-21 00:00:00",tz=tztz))
 
 # Create subsets of data to merge
 vars <- c("daily_time","linear1", "linear2")
