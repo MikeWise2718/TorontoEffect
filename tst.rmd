@@ -1,0 +1,27 @@
+---
+title: "Untitled"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(shiny)
+library(grid)
+library(ggplot2)
+```
+
+```{r }
+h2("My Main Header")
+hh2 <- function(htxt){
+  return(sprintf("<!--html_preserve--><h2>My sub Header</h2><!--/html_preserve-->"))
+}
+for (i in 1:3){
+  hh2("My sub header")
+# par(fin=c(8,4))
+  #print(i)
+#grid.newpage()
+#grid.text("hi",0.1,0.1,just=0)
+ qplot(wt, mpg, data=mtcars)
+}
+
+```

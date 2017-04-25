@@ -1,0 +1,360 @@
+---
+title: "Chat Log Regressions"
+author: "Mike Wise"
+date: "13 Mar 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data pre-processed and analyzied from chat logs and web logs by Marcus Collins. 
+
+Analysis based on R-Scripts from Jacob LaRiviere.
+
+R-Markdown and plots from Mike Wise.
+
+## Initialization of libraries
+```{r, message=F}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+library(zoo,quietly=T,warn.conflicts=F)
+library(lmtest,quietly=T,warn.conflicts=F)
+library(sandwich,quietly=T,warn.conflicts=F)
+library(gridExtra)
+```
+
+Set random seeds, record start time and version.
+
+```{r}
+set.seed(1234)
+version <-0.1
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+```
+
+
+#### Various constants
+
+```{r}
+tztz <- "UTC"  # Apparently all of our time zones are UTC...
+s2date <- function(strdate){
+  return(as.POSIXct(strdate,tz=tztz))
+}
+firstday <- s2date("2015-01-01")  # we will count days from the first day in 2015
+
+smcdates <- c("2016-08-17/red/0-30%","2016-09-1/red/30-50%","2016-09-07/red/50-100%")
+xtotdates <- c("2016-10-11/purple/0-10%","2016-10-18/purple/10-30%","2016-11-01/purple/30-50%","2016-12-15/purple/50-90%",
+              "2016-11-17/blue/content change")
+totdates <- c(smcdates,xtotdates)
+smcback <- "lightsteelblue1"
+xbxback <- "darkseagreen2"
+xabback <- "darkseagreen3"
+totback <- "wheat"
+
+fpath <- "../TorontoData"
+sdate <- s2date("2016-06-01")
+mdate <- s2date("2017-01-01")
+edate <- s2date("2017-02-01")
+```
+
+#### Misc utility functions
+
+```{r}
+
+addStepDateToVek <- function(dates,idx,dtvek,vvek){
+  sar1 <- unlist(strsplit(dates[[idx]],"/"))
+  datepart1 <- sar1[[1]]
+  levpart1 <- sar1[[3]]
+  if (!grepl("%",levpart1)){
+    # if there is no % don't do anything
+    return(vvek)
+  }
+  dt1 <- s2date(datepart)
+  if (idx<length(dates)){
+    sar2 <- unlist(strsplit(dates[[idx+1]],"/"))
+    datepart2 <- sar2[[1]]
+    dt2 <- s2date(datepart2)
+  } else {
+    dt2 <- max(dtvek)
+  }
+  #print(dt1)
+  #print(dt2)
+  val <- as.numeric(gsub("%","",unlist(strsplit(levpart1,"-"))[[2]]))
+  tochg <-  dt1<=dtvek & dtvek<= dt2
+  vvek[ tochg ] <- val
+  #print(sprintf("changed %d values to %d",sum(tochg),val))
+  return(vvek)
+}
+getStepDates <- function(dates,dtvek){
+ vvek <- rep(0,length(dtvek))
+ for (i in 1:length(smcdates)){
+   vvek <- addStepDateToVek(dates,i,dtvek,vvek)
+ }
+ return(vvek)
+}
+getSmcStepDates <- function(dtvek){
+ return(getStepDates(smcdates,dtvek))
+}
+getXabStepDates <- function(dtvek){
+ return(getStepDates(xtotdates,dtvek))
+}
+```
+
+
+
+#### Plot functions
+
+
+```{r}
+addVlinesAndText <- function(vlines,gp){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab")
+  ldf$dt <- s2date(ldf$dt)
+  ldf$ndt <- as.numeric(ldf$dt)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+  
+  ldf$lab <- paste0("\n",ldf$lab) 
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=0,angle=90,na.rm=T)
+  return(gp)
+}
+addBackground <- function(backg,gp){
+  if (is.null(backg)) return(gp) # do nothing in this case
+  gp <- gp + theme(panel.background = element_rect(fill = backg))
+  return(gp)
+}
+overdate <- function(ovdate,defdate){
+  # date override
+  rv <- defdate
+  if (!is.null(ovdate)) { 
+    rv <- ovdate
+  }
+  return(rv)
+}
+dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,ovsdate=NULL,ovedate=NULL){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  brkctrl <- "1 month"
+  dltdays <- difftime(dpedate,dpsdate,"days") 
+  if (dltdays<30) brkctrl <- "1 day"
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_line(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks(brkctrl),limits=c(dpsdate,dpedate))
+
+  gp <- addVlinesAndText(vlines,gp)
+
+  gp <- addBackground(backg,gp)
+
+  return(gp)
+}
+residplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,ovsdate=NULL,ovedate=NULL){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  brkctrl <- "1 month"
+  dltdays <- difftime(dpedate,dpsdate,"days") 
+  if (dltdays<30) brkctrl <- "1 day"
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_point(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks(brkctrl),limits=c(dpsdate,dpedate))
+
+  gp <- addVlinesAndText(vlines,gp)
+
+  gp <- addBackground(backg,gp)
+  
+  hp <- ggplot(ddf) + geom_histogram(aes_string(x=y),binwidth=10)
+  hp <- addBackground(backg,hp)
+  
+  ghp <- grid.arrange(gp, hp, ncol=2,widths = c(2,1))
+
+  return(ghp)
+}
+```
+
+## Read in chat volume data
+
+```{r}
+stload <- Sys.time()
+readChatVolume <- function(frdate,todate,fname){
+  fstload <- Sys.time()
+
+  cfname <- sprintf("%s/%s",fpath,fname)
+  cvdf <- read.csv(cfname)  
+  temp_date<- as.POSIXct(cvdf$Date,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+  temp_datehour<- as.POSIXct(cvdf$DateHour,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+
+  cvdf  <- cvdf %>% mutate( dt = temp_datehour) %>%
+                    mutate( dnum = round(as.numeric(difftime(temp_date,firstday,"days")))) %>%
+                    mutate( hnum = dnum*24 + hour(dt))
+    
+  # restrict rows as different files sometimes have extra colums
+  cvdf <- cvdf %>% arrange( dt ) # sort
+  cvdf <- cvdf[,c("dt","dnum","hnum","IsSXC","IsSMC","virtualAgent","Subject",
+                  "CountryCode","MeanChatDuration","CumulativeChatDuration","ChatsInBlock")]
+  n1 <- nrow(cvdf)
+  cvdf <- cvdf %>% filter( frdate<=dt & dt<todate)
+  n2 <- nrow(cvdf)
+  elap <- as.numeric((Sys.time()-fstload)[1],units="secs")
+  print(sprintf("Read %d of %d lines from %s in %.1f secs",n2,n1,cfname,elap))
+  return(cvdf)
+}
+cvdf1 <- readChatVolume(sdate,mdate,"chat_volume_duration_features-Aug2016-current.csv")
+cvdf2 <- readChatVolume(mdate,edate,"chat_volume_duration_features-2017.csv")
+
+cvdf <- rbind(cvdf1,cvdf2)
+
+cvdf <- cvdf %>% filter( CountryCode=="USA" ) %>% arrange( dt )
+
+print(sprintf("Rows after filtering to USA only: %d",nrow(cvdf)))
+elap <- as.numeric((Sys.time()-stload)[1],units="secs")
+print(sprintf("Loading data took %.1f secs",elap))
+```
+
+
+
+
+## Xbox vs. SMC Entry count
+
+Note that IsSMX and IsSMC are almost mutually exclusive, so we split them
+
+```{r fig.width=14, fig.height=6, echo=T}
+xtabs(~ IsSMC + IsSXC,cvdf)
+smcdf <- cvdf %>% filter(IsSMC=="True")
+sxcdf <- cvdf %>% filter(IsSXC=="True")
+
+xvsdf <- cvdf %>% group_by(dnum,IsSMC) %>% summarise(dt=min(dt),count=n()) %>%
+                  mutate(series=ifelse(IsSMC=="True","SMC","XBOX"))
+
+dailyplot(xvsdf,"dt","count",series="series",mtit="Total - SMC vs. XBOX",ylab="Count",vlines=totdates,backg=totback)
+```
+
+
+## SMC daily plots
+```{r fig.width=14, fig.height=6, echo=T}
+df <- smcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cib = sum(ChatsInBlock))
+dailyplot(df,"dt","cib","SSMC - Chats In Block",ylab="Sum",vlines=smcdates,backg=smcback)
+```
+## SMC daily plots
+```{r fig.width=14, fig.height=6, echo=T}
+crackdate <- function(datestr){
+  sar <- unlist(strsplit(datestr,"/"))
+  date <- s2date(sar[[1]])
+  val <- 0
+  sval <- ""
+  levpart <- sar[[3]]
+  if (grepl("%",levpart)){
+    levpart <- gsub("%","",levpart)
+    val <- as.numeric(unlist(strsplit(levpart,"-"))[[2]])
+    sval <- gsub("-","_",levpart)
+  }
+  return(list(date=date,val=val,sval=sval))
+}
+genregdf <- function(df,vname,discdate,befdays,aftdays,dates){
+  df <- df[,c("dt",vname)]
+  
+  # filter on time
+  sregdate <- discdate - days(befdays)
+  eregdate <- discdate + days(aftdays)
+  df <- df %>% filter( sregdate <= dt & dt <= eregdate) 
+  
+  df <- df %>% mutate( hour=as.factor(hour(dt)) ) %>%
+               mutate( idx=1:nrow(df) ) 
+
+  # add level variables
+  cutidx <- which(df$dt==discdate)
+
+    df <- df %>% mutate( lin1=if_else(idx<cutidx,idx,0L)) %>%
+                 mutate( lin2=if_else(idx<cutidx,0L,idx-cutidx+1L)) %>%
+                 mutate( pastbrk=if_else(idx<cutidx,0L,1L) )
+
+  # skydates
+  for (strdate in dates){
+    crk <- crackdate(strdate)
+    skyname <- paste0("sky",crk$sval)
+    df[[skyname]] <- ifelse(df$dt<crk$date,0,1)
+  }
+  formstr <- sprintf("%s ~ hour + lin1 + lin2 + pastbrk",vname)
+  form <- as.formula(formstr)
+  fit <- glm(form,data=df)
+  print(summary(fit))
+  print(coeftest(fit, vcov = vcovHC(fit, "HC1")))
+  df$resid <- resid(fit)
+  df$predicted <-  df$cib-df$resid
+  return(list(df=df,formstr=formstr))
+}
+```
+
+```{r fig.width=14, fig.height=6, echo=T}
+hsmcdf <- smcdf %>% group_by(hnum) %>% summarize(dt=min(dt),cib = sum(ChatsInBlock))
+cutdate <- smcdates[1]
+discdate <- crackdate(cutdate)$date
+vname <- "cib"
+rv <- genregdf(hsmcdf,vname,discdate,7,7,cutdate)
+df1 <- rv$df %>%  gather_("series",vname,c(vname,"predicted"))
+mtit <- sprintf("SSMC - Hourly Chats In Block - %s",rv$formstr)
+dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+```
+```{r fig.width=14, fig.height=6, echo=T}
+mtit <- sprintf("SSMC - Hourly Chats In Block - Residuals - %s",rv$formstr)
+residplot(df1,"dt","resid",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+```
+
+
+```{r fig.width=14, fig.height=6, echo=T}
+cutdate <- smcdates[2]
+discdate <- crackdate(cutdate)$date
+vname <- "cib"
+rv <- genregdf(hsmcdf,vname,discdate,7,7,cutdate)
+df1 <- rv$df %>%  gather_("series",vname,c(vname,"predicted"))
+mtit <- sprintf("SSMC - Hourly Chats In Block - %s",rv$formstr)
+dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+
+```
+```{r fig.width=14, fig.height=6, echo=T}
+mtit <- sprintf("SSMC - Hourly Chats In Block - Residuals - %s",rv$formstr)
+residplot(df1,"dt","resid",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+```
+```{r fig.width=14, fig.height=6, echo=T}
+cutdate <- smcdates[3]
+discdate <- crackdate(cutdate)$date
+vname <- "cib"
+rv <- genregdf(hsmcdf,vname,discdate,7,7,cutdate)
+df1 <- rv$df %>%  gather_("series",vname,c(vname,"predicted"))
+mtit <- sprintf("SSMC - Hourly Chats In Block - %s",rv$formstr)
+dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+```
+```{r fig.width=14, fig.height=6, echo=T}
+mtit <- sprintf("SSMC - Hourly Chats In Block - Residuals - %s",rv$formstr)
+residplot(df1,"dt","resid",mtit,ylab="Sum",vlines=smcdates,backg=smcback,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+```
+
+## Done
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```

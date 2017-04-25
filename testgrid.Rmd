@@ -1,0 +1,80 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(shiny)
+library(grid)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r  fig.width = 8, fig.height = 6, results="asis", echo=F}
+  h2("My Header1")
+h2("My Header11")
+
+
+getparstr <- function(parsel,explain=""){
+  txt <- paste(sprintf("%.2f",par(parsel)),collapse=" ")
+  txt <- sprintf("par(%s) = %s   # %s",parsel,txt,explain)
+  return(txt)
+}
+
+doplot <- function(){
+  grid.newpage()
+  
+  par(bty="7")
+  
+  grid.text(getparstr("fig","figure space limits"),0.4,0.90,just=0)
+  grid.text(getparstr("plt","plot space limits"),0.4,0.85,just=0)
+  grid.text(getparstr("din","device size inches"),0.4,0.80,just=0)
+  
+  for (ix in 1:10){
+    x <- ix/10
+    grid.polyline(c(x,x),c(0,1))
+    txt <- sprintf("x: %.2f",x)
+    grid.text(txt,x,0.1,just=0)
+  }
+  for (iy in 1:10){
+    y <- iy/10
+    grid.polyline(c(0,1),c(y,y))
+    txt <- sprintf("y: %.2f",y)
+    grid.text(txt,0.1,y,just=0)
+  }
+}
+for (i in 1:3){
+h2("My Header12")
+}
+
+  h2("My Sub Header")
+  doplot()
+ # par(fin=c(8,4))
+  plot(pressure)
+  
+    h2("My Sub Header")
+  doplot()
+ # par(fin=c(8,4))
+  plot(pressure)
+
+
+h2("My Header13")
+
+```
+asdf
+
+```{r results="asis", echo=F}
+  h2("My Header2")
+```
+
+bla bla bla

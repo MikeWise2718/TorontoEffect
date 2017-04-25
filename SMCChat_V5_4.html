@@ -133,12 +133,14 @@ library(zoo,quietly=T,warn.conflicts=F)
 library(lmtest,quietly=T,warn.conflicts=F)
 library(sandwich,quietly=T,warn.conflicts=F)
 library(tidyverse,verbose=F,quietly=T,warn.conflicts=F)</code></pre>
+<pre><code>## Warning: package 'tidyverse' was built under R version 3.3.3</code></pre>
 <pre><code>## Loading tidyverse: ggplot2
 ## Loading tidyverse: tibble
 ## Loading tidyverse: tidyr
 ## Loading tidyverse: readr
 ## Loading tidyverse: purrr
 ## Loading tidyverse: dplyr</code></pre>
+<pre><code>## Warning: package 'tidyr' was built under R version 3.3.3</code></pre>
 <pre><code>## Conflicts with tidy packages ----------------------------------------------</code></pre>
 <pre><code>## filter(): dplyr, stats
 ## lag():    dplyr, stats</code></pre>
@@ -154,7 +156,7 @@ startfmttime &lt;- sprintf(format(starttime, &quot;%d %b %Y - %H:%M:%S&quot;))
 tztz &lt;- &quot;US/Pacific&quot;
 
 print(sprintf(&quot;%s created on %s&quot;,versionstring,startfmttime))</code></pre>
-<pre><code>## [1] &quot;Version 5.2 created on 22 Feb 2017 - 12:32:04&quot;</code></pre>
+<pre><code>## [1] &quot;Version 5.2 created on 15 Mar 2017 - 12:40:18&quot;</code></pre>
 <pre class="r"><code>fname &lt;- &quot;data/chat-vol-duration-features.csv&quot;</code></pre>
 </div>
 <div id="read-in-and-prep-data" class="section level1">
@@ -438,7 +440,7 @@ analyzeBreakResiduals(&quot;3rd break&quot;,&quot;2016-11-01&quot;,&quot;2016-10
 </div>
 <div id="done" class="section level1">
 <h1>Done</h1>
-<pre><code>## [1] &quot;Version 5.2 created on 22 Feb 2017 - 12:32:04 took 38.5 secs&quot;</code></pre>
+<pre><code>## [1] &quot;Version 5.2 created on 15 Mar 2017 - 12:40:18 took 43.5 secs&quot;</code></pre>
 </div>
 
 

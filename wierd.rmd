@@ -1,0 +1,52 @@
+---
+title: "R-markdown plot visibility strangeness"
+output: html_document
+---
+  
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(shiny)
+library(grid)
+library(ggplot2)
+```
+
+## 1- base plot: This should emit three base plots but emits only one 
+#### Interestingly R-Studio's chunk preview shows me all three
+
+```{r chunk_1, echo=T}
+for (i in 1:3){
+ plot(pressure)
+}
+```
+
+## 2- ggplot2 plot: This should emit three ggplots but it emits none
+
+```{r chunk_2, echo=T }
+for (i in 1:3){
+ qplot(wt, mpg, data=mtcars)
+}
+```
+
+## 3- base plot: This emits only one, when I asked for three
+
+```{r chunk_3, echo=T }
+plot(pressure)
+plot(pressure)
+plot(pressure)
+```
+
+## 4- base plot: But if they are a bit different, then I do get three
+
+```{r chunk_4, echo=T }
+plot(pressure,col="red")
+plot(pressure,col="green")
+plot(pressure,col="blue")
+```
+
+## 5 - ggplot2 plot: But this emits three as expected
+
+```{r chunk_5, echo=T }
+qplot(wt, mpg, data=mtcars)
+qplot(wt, mpg, data=mtcars)
+qplot(wt, mpg, data=mtcars)
+```

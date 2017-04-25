@@ -1,0 +1,11 @@
+library(dplyr)
+library(ggplot2)
+set.seed(1234)
+n <- 100
+dtdt <- sample(seq(c(ISOdate(2016,1,1)), by = "day", length.out = 10),n,replace=T)
+datx <- sample(c('a','b','c'),n,replace=T)
+daty <- round(100*runif(n))
+df <- data.frame(dt=dtdt,x=datx,y=daty)
+df <- df %>% arrange(dt)
+gdf <- df %>% group_by(dt,x) %>% summarize(y=sum(y))
+ggplot(gdf) + geom_bar(aes(dt,y,fill=x),stat="identity") + facet_wrap(~x,ncol=1)

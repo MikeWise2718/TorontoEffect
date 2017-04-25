@@ -1,0 +1,267 @@
+---
+title: "ChatData Overview"
+author: "Mike Wise"
+date: "27 Feb 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Initialization
+```{r}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+
+set.seed(1234)
+version <-0.2
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+
+```
+
+```{r}
+dailyplot <- function(x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL){
+  ymax <- max(y)*1.05
+  ddf <- data.frame(x=x,y=y)
+  gp <- ggplot(ddf) + geom_line(aes(x,y))  +
+            xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+            scale_y_continuous(limits=c(0,ymax)) +
+            scale_x_datetime("Date",breaks = date_breaks("1 months"))
+  if (!is.null(vlines)){
+    # split the lines and convert to data.frame
+    sar <- strsplit(vlines,"/")
+    # the following reforms the date strings into a data.frame for geom_vline
+    ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar))))
+    names(ldf) <- c("dt","clr","lab")
+    ldf$dt <- as.POSIXct(ldf$dt,tz=tztz)
+    ldf$ndt <- as.numeric(ldf$dt)
+    ldf$lab <- paste0("\n",ldf$lab)
+    gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+               annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=0,angle=90)
+  }
+  if (!is.null(backg)){
+     gp <- gp + theme(panel.background = element_rect(fill = backg))
+  }
+  return(gp)
+}
+dailyplot2 <- function(x,y,z,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL){
+  zlab <- substitute(z)
+  ymax <- max(y)*1.05
+  ddf <- data.frame(x=x,y=y,z=z)
+  names(ddf)[3] <- as.character(zlab)
+  gp <- ggplot(ddf,aes(x,y)) + geom_line(aes_string(color=zlab)) +
+            xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+            scale_y_continuous(limits=c(0,ymax)) +
+            scale_x_datetime("Date",breaks = date_breaks("1 months"))
+  if (!is.null(vlines)){
+    # split the lines and convert to data.frame
+    sar <- strsplit(vlines,"/")
+    # the following reforms the date strings into a data.frame for geom_vline
+    ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar))))
+    names(ldf) <- c("dt","clr","lab")
+    ldf$dt <- as.POSIXct(ldf$dt,tz=tztz)
+    ldf$ndt <- as.numeric(ldf$dt)
+    ldf$lab <- paste0("\n",ldf$lab)
+    gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+               annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=0,angle=90)
+  }
+  if (!is.null(backg)){
+     gp <- gp + theme(panel.background = element_rect(fill = backg))
+  }
+  return(gp)
+}
+```
+
+```{r}
+tztz <- "US/Pacific"
+
+smcdates <- c("2016-08-17/red/0-30%","2016-09-1/red/30-50%","2016-09-07/red/50-100%")
+xabdates <- c("2016-10-11/red/0-10%","2016-10-18/red/10-30%","2016-11-01/red/30-50%","2016-11-17/blue/content change","2016-12-15/red/50-90%")
+smcback <- "lightsteelblue1"
+xabback <- "darkseagreen2"
+
+fname <- "../data/chat_volume_duration_features-Aug2016-current.csv"
+
+cvdf <- read.csv(fname)
+cvdf$BlockBeginTime1 <- gsub("3/13/2016 2:","3/13/2016 3:",cvdf$BlockBeginTime)
+cvdf$DateHour1 <- gsub("3/13/2016 2:","3/13/2016 3:",cvdf$DateHour)
+cvdf$bbt <- as.POSIXct(cvdf$BlockBeginTime1,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+cvdf$dtd <- as.POSIXct(cvdf$Date,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+cvdf$dt <- as.POSIXct(cvdf$DateHour1,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+cvdf$dnum <- round(as.numeric(difftime(cvdf$dtd,as.POSIXct("2015-01-01",tz=tztz),"days")),0)
+cvdf$hnum <- cvdf$dnum*24 + hour(cvdf$dt)
+
+# Just USA
+#cvdf <- cvdf[cvdf$CountryCode=="USA",]
+
+# get rid of everything before July 2016
+cutdate <- "2016-06-01"
+print(sprintf("Rows before filtering from %s were %d",cutdate,nrow(cvdf)))
+cvdf <- cvdf[cvdf$dt>=as.POSIXct(cutdate,tz=tztz),]
+print(sprintf("Rows after  filtering from %s were %d",cutdate,nrow(cvdf)))
+```
+
+# Xbox vs. SMC
+
+Note that IsSMX and IsSMC are almost mutually exclusive, so we split them
+
+```{r}
+xtabs(~ IsSMC + IsSXC,cvdf)
+smcdf <- cvdf[cvdf$IsSMC=="True",]
+sxcdf <- cvdf[cvdf$IsSXC=="True",]
+print(sprintf("smcdf rows:%d",nrow(smcdf)))
+print(sprintf("sxcdf rows:%d",nrow(sxcdf)))
+```
+
+
+# SMC daily plots
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cib = sum(ChatsInBlock))
+dailyplot(df$dt,df$cib,"SMC - Chats In Block",ylab="Sum",vlines=smcdates,backg=smcback)
+```
+
+
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cmins = sum(ChatsInBlock*MeanChatDuration) )
+dailyplot(df$dt,df$cmins,"SMC - Chat Minutes",ylab="Sum",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cmins = sum(CumulativeChatDuration) )
+dailyplot(df$dt,df$cmins,"SMC - Cummulative Chat Duration",ylab="Sum",vlines=smcdates,backg=smcback)
+```
+
+
+
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum) %>% summarize(dt=min(dt),entrycount = n())
+dailyplot(df$dt,df$entrycount,"SMC - Entry Count",ylab="Count",vlines=smcdates,backg=smcback)
+```
+
+# SXC daily plot
+
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cib = sum(ChatsInBlock) )
+dailyplot(df$dt,df$cib,"SXC - Chats In Block",ylab="Sum",vlines=xabdates,backg=xabback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum) %>% summarize(dt=min(dt),cmins = sum(ChatsInBlock*MeanChatDuration) )
+dailyplot(df$dt,df$cmins,"SXC - Chat Minutes",ylab="Sum",vlines=xabdates,backg=xabback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum) %>% summarize(dt=min(dt),entrycount=n() )
+dailyplot(df$dt,df$entrycount,"SXC - Entry Count",ylab="Count",vlines=xabdates,backg=xabback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum,XboxVA) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+XboxVA <- df$XboxVA
+dailyplot2(df$dt,df$count,XboxVA,"SMC - XboxVA",ylab="Count",vlines=smcdates,backg=smcback)
+```
+
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum,XboxVA) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+XboxVA <- df$XboxVA
+dailyplot2(df$dt,df$count,XboxVA,"SXC - XboxVA",ylab="Count",vlines=xabdates,backg=xabback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum,PartnerVA) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+PartnerVA <- df$PartnerVA
+dailyplot2(df$dt,df$count,PartnerVA,"SMC - PartnerVA",ylab="Count",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum,PartnerVA) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+PartnerVA <- df$PartnerVA
+dailyplot2(df$dt,df$count,PartnerVA,"SXC - PartnerVA",ylab="Count",vlines=xabdates,backg=xabback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- smcdf %>% group_by(dnum,virtualAgent) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+virtualAgent <- df$virtualAgent
+dailyplot2(df$dt,df$count,virtualAgent,"SMC - virtualAgent",ylab="Count",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+df <- sxcdf %>% group_by(dnum,virtualAgent) %>% summarize(dt=min(dt),count = n() )
+df$dt <- as.POSIXct(as.Date(df$dt,tz=tztz),tz=tztz)
+virtualAgent <- df$virtualAgent
+dailyplot2(df$dt,df$count,virtualAgent,"SMC - virtualAgent",ylab="Count",vlines=xabdates,backg=xabback)
+```
+# Read inSMC Active User/Session data
+```{r}
+svfname <- "../data/hourly-smc-traffic.csv"
+svdf <- read.csv(svfname)
+svdf$sdt <- sprintf("%d-%2.2d-%2.2d %2.2d",svdf$EventUtcYear,svdf$EventUtcMonth,svdf$EventUtcDay,svdf$EventUtcHour)
+svdf$dtutc <- as.POSIXct(svdf$sdt,format="%Y-%m-%d %H",tz="UTC")
+svdf$dt <- as.POSIXct(svdf$dtutc,tz=tztz)
+svdf$dtd <- as.POSIXct(svdf$sdt,format="%Y-%m-%d",tz=tztz)
+svdf$dnum <- round(as.numeric(difftime(svdf$dtd,as.POSIXct("2015-01-01",tz=tztz),"days")),0)
+svdf$hnum <- svdf$dnum*24 + hour(svdf$dt)
+  
+# get rid of everything before July 2016
+cutdate <- "2016-06-01"
+print(sprintf("Rows before filtering from %s were %d",cutdate,nrow(svdf)))
+svdf <- svdf[svdf$dt>=as.POSIXct(cutdate,tz=tztz),]
+print(sprintf("Rows after  filtering from %s were %d",cutdate,nrow(svdf)))
+svdf$spuratio <- svdf$HourlyActiveSessions / svdf$HourlyActiveUsers
+
+
+```
+
+# Hourly Active Sessions
+```{r fig.width=14, fig.height=6, echo=F}
+dailyplot(svdf$dt,svdf$HourlyActiveSessions,"SMC - Hourly Active Sessions",ylab="Count",vlines=smcdates,backg=smcback)
+```
+
+
+# SMC Active User/Session data
+```{r fig.width=14, fig.height=6, echo=F}
+cvdf1 <- cvdf[,c("hnum","CumulativeChatDuration","ChatsInBlock","MeanChatDuration")]
+msvdf <- merge(svdf,cvdf1, by="hnum")
+msvdf <- msvdf[order(msvdf$dt), ]
+msvdf$chatMinPerUser <- msvdf$CumulativeChatDuration/msvdf$HourlyActiveSessions
+msvdf <- msvdf[ msvdf$chatMinPerUser<0.1,]
+dailyplot(msvdf$dt,msvdf$chatMinPerUser,"SMC - Chat Minutes Per Session",ylab="Minutes/Session",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+ccvdf <- cvdf %>% filter(dt>=as.POSIXct(cutdate,tz=tztz)) %>% group_by(hnum,IsSMC,virtualAgent) %>% 
+                  filter(IsSMC=="True") %>% 
+                  summarise(dnum=min(dnum),dt=min(dt),ncib=sum(ChatsInBlock),chatmins=sum(CumulativeChatDuration),nrecs=n()) 
+                  
+virtualAgent <- ccvdf$virtualAgent
+dailyplot2(ccvdf$dt,ccvdf$nrecs,virtualAgent,"SMC - Records per hour",ylab="Count",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+dailyplot2(ccvdf$dt,ccvdf$chatmins,virtualAgent,"SMC - Chat Minutes per hour",ylab="Sum minutes",vlines=smcdates,backg=smcback)
+```
+
+```{r fig.width=14, fig.height=6, echo=F}
+dailyplot2(ccvdf$dt,ccvdf$ncib,virtualAgent,"SMC - Chat Sessions?",ylab="Count",vlines=smcdates,backg=smcback)
+```
+```{r fig.width=14, fig.height=6, echo=F}
+ccvdf$cmpsess <- ccvdf$chatmins/ccvdf$ncib
+ccvdf <- ccvdf[ccvdf$cmpsess<100,]
+virtualAgent <- ccvdf$virtualAgent
+dailyplot2(ccvdf$dt,ccvdf$cmpsess,virtualAgent,"SMC - ChatMinues per session",ylab="Minutes",vlines=smcdates,backg=smcback)
+```
+
+```{r fig.width=14, fig.height=6, echo=F}
+dccvdf <- ccvdf %>% group_by(dnum,virtualAgent) %>% summarise(dt=min(dt),cmpsess=mean(cmpsess))
+virtualAgent <- dccvdf$virtualAgent
+dailyplot2(dccvdf$dt,dccvdf$cmpsess,virtualAgent,"SMC - ChatMinues per session",ylab="Minutes",vlines=smcdates,backg=smcback)
+```
+
+
+# Done
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```

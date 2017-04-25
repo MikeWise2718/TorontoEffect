@@ -10,9 +10,6 @@ library(stringr)
 #library(chron)
 library(dplyr)
 
-
-
-
 #setwd("C:/Users/jlariv/Documents/OneDrive for Business/Toronto/Data")
 #setwd("C:/Users/jlariv/OneDrive - Microsoft/Toronto/Data")
 setwd("C:/transfer/Toronto/Data")
