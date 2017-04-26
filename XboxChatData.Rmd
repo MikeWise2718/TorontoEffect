@@ -1,0 +1,243 @@
+---
+title: "XBOX Chat Data 0.1"
+author: "Mike Wise"
+date: "26 April 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data pre-processed and analyzied from call volume logs and web logs by Marcus Collins. 
+
+Analysis based on R-Scripts from Jacob LaRiviere.
+
+R-Markdown and plots from Mike Wise.
+
+## Library Initialization
+```{r, message=F}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+```
+
+#### Set random seeds, record start time and version.
+
+```{r}
+set.seed(1234)
+version <-0.1
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+```
+
+#### Various constants
+
+```{r}
+tztz <- "UTC"  # Apparently all of our time zones are UTC...
+firstday <- as.POSIXct("2015-01-01",tz=tztz)  # we will count days from the first day in 2015
+
+smcdates <- c("2016-08-17/red/0-30%","2016-09-1/red/30-50%","2016-09-07/red/50-100%")
+xtotdates <- c("2016-10-11/purple/0-10%","2016-10-18/purple/10-30%","2016-11-01/purple/30-50%","2016-12-15/purple/50-90%",
+              "2016-11-17/blue/content change")
+totdates <- c(smcdates,xtotdates)
+smcback <- "lightsteelblue1"
+xbxback <- "darkseagreen2"
+xabback <- "darkseagreen3"
+totback <- "wheat"
+
+fpath <- "TorontoData"
+sdate <- as.POSIXct("2016-06-01",tz=tztz)
+mdate <- as.POSIXct("2017-01-01",tz=tztz)
+edate <- as.POSIXct("2017-02-01",tz=tztz)
+```
+
+
+#### Misc utility functions
+
+```{r}
+addStepDateToVek <- function(dates,idx,dtvek,vvek){
+  sar1 <- unlist(strsplit(dates[[idx]],"/"))
+  datepart1 <- sar1[[1]]
+  levpart1 <- sar1[[3]]
+  if (!grepl("%",levpart1)){
+    # if there is no % don't do anything
+    return(vvek)
+  }
+  dt1 <- as.POSIXct(datepart1,tz=tztz)
+  if (idx<length(dates)){
+    sar2 <- unlist(strsplit(dates[[idx+1]],"/"))
+    datepart2 <- sar2[[1]]
+    dt2 <- as.POSIXct(datepart2,tz=tztz)
+  } else {
+    dt2 <- max(dtvek)
+  }
+  #print(dt1)
+  #print(dt2)
+  val <- as.numeric(gsub("%","",unlist(strsplit(levpart1,"-"))[[2]]))
+  tochg <-  dt1<=dtvek & dtvek<= dt2
+  vvek[ tochg ] <- val
+  #print(sprintf("changed %d values to %d",sum(tochg),val))
+  return(vvek)
+}
+getStepDates <- function(dates,dtvek){
+ vvek <- rep(0,length(dtvek))
+ for (i in 1:length(smcdates)){
+   vvek <- addStepDateToVek(dates,i,dtvek,vvek)
+ }
+ return(vvek)
+}
+getSmcStepDates <- function(dtvek){
+ return(getStepDates(smcdates,dtvek))
+}
+getXabStepDates <- function(dtvek){
+ return(getStepDates(xtotdates,dtvek))
+}
+```
+
+
+#### Plot Functions
+
+Plots created using ggplot2
+
+
+```{r}
+addVlinesAndText <- function(vlines,gp){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab")
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tztz)
+  ldf$ndt <- as.numeric(ldf$dt)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+  
+  ldf$lab <- paste0("\n",ldf$lab) 
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=0,angle=90)
+  return(gp)
+}
+addBackground <- function(backg,gp){
+  if (is.null(backg)) return(gp) # do nothing in this case
+  gp <- gp + theme(panel.background = element_rect(fill = backg))
+  return(gp)
+}
+overdate <- function(ovdate,defdate){
+  # date override
+  rv <- defdate
+  if (!is.null(ovdate)) { 
+    rv <- ovdate
+  }
+  return(rv)
+}
+dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,ovsdate=NULL,ovedate=NULL){
+  # Single series plot  with monthly breaks on the x-axis
+  
+    # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_line(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks("1 years"),limits=c(dpsdate,dpedate))
+
+  gp <- addVlinesAndText(vlines,gp)
+
+  gp <- addBackground(backg,gp)
+
+  return(gp)
+}
+```
+
+## Read in chat volume data 
+
+```{r}
+xchstload <- Sys.time()
+readXboxChatVolume <- function(frdate,todate,fname){
+  fstload <- Sys.time()
+  cfname <- sprintf("%s/%s",fpath,fname)
+  lxdf <- read.csv(cfname)
+  print(sprintf("read %s - read rows:%d  cols:%d",cfname,nrow(lxdf),ncol(lxdf)))
+  
+  lxdf$DateHourStr <- sprintf("%4.4d/%2.2d/%2.2d %2.2d:00:00",lxdf$Year,lxdf$Month,lxdf$Day,lxdf$Hour)
+  lxdf$dt <- as.POSIXct(lxdf$DateHourStr,format="%Y/%m/%d %H:%M:%S",tz=tztz)
+  lxdf$dtd<- as.POSIXct(lxdf$DateHourStr,format="%Y/%m/%d",tz=tztz)
+
+  print(sprintf("Min date %s  Max date %s",min(lxdf$dt),max(lxdf$dt)))
+    
+  #filter on date
+  n1 <- nrow(lxdf)
+  # lxdf <- lxdf %>% filter( frdate<=dt & dt<todate)
+  n2 <- nrow(lxdf)
+  # print(sprintf("Date filter from %s to %s  - rows before filter:%d after filter:%d",frdate,todate,n1,n2))
+  
+  
+ # lxdf$temp_date<- as.POSIXct(lxdf$Date,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
+  lxdf  <- lxdf %>% mutate( dnum = round(as.numeric(difftime(dtd,firstday,units="days")))) %>%
+                    mutate( hnum = dnum*24 + hour(dt))
+
+  # restrict rows as different files sometimes have extra colums
+  lxdf <- lxdf %>% arrange( dt ) # sort
+  lxdf <- lxdf[,c("dt","dnum","hnum",
+                  "Country","Lang","Category","X266","X338","X42","X54","X1")]
+  elap <- as.numeric((Sys.time()-fstload)[1],units="secs")
+  
+  lxdf <- lxdf %>% filter( Country=="United States" ) %>% 
+                   arrange( dt )
+  
+  # just need these columns and group by hour
+  # lxdf <- lxdf[,c("dt","dnum","hnum","IsSMC","ChatsInBlock")]
+  # lxdf <- lxdf %>% group_by(hnum) %>%
+  #                  summarize(dt=min(dt),dnum=min(dnum),
+  #                            totchib=sum(ChatsInBlock),
+  #                            winchib=sum((IsSMC=="True")*ChatsInBlock),
+  #                            xbxchib=sum((IsSMC=="False")*ChatsInBlock)) %>%
+  #                  mutate(ChatsInBlock=NULL,IsSMC=NULL) %>%
+  #                  arrange(hnum)
+
+  print(sprintf("Read %d of %d lines from %s in %.1f secs",n2,n1,cfname,elap))
+  return(lxdf)
+}
+xchdf <- readXboxChatVolume(sdate,mdate,"XboxChat2015-2017fromDatawarehouse.csv")
+xchdf <- xchdf %>% arrange(hnum)
+
+summary(xchdf)
+
+xchelap <- as.numeric((Sys.time()-xchstload)[1],units="secs")
+print(sprintf("Loading chat data took %.1f secs",xchelap))
+```
+
+```{r echo=F, fig.height=12,fig.width=8}
+cattab <- table(xchdf$Category)
+catvek <- as.numeric(table(xchdf$Category))
+names(catvek) <- names(cattab)
+catvek <- catvek[order(catvek,decreasing=T)]
+cdf <- data.frame(cat=names(catvek),count=as.numeric(catvek),row.names=NULL)
+#cdf <- cdf %>% filter(grepl("^WW.EN",cat))
+cdf <- cdf %>% filter( count>0 )
+ggplot(cdf) + geom_bar(aes(x=cat,y=count),fill=I("blue"),stat="identity") + coord_flip() 
+```
+
+```{r echo=F, fig.height=6,fig.width=8}
+xchdf <- xchdf %>% mutate( billing  = grepl( "BILLING",Category ) ) %>% 
+                   mutate( hardware = grepl("HARDWARE",Category ) )
+dxchdf <- xchdf %>% group_by(dnum) %>% summarize( dt=min(dt),bill=sum(billing), tech=sum(hardware) )
+pltdf <- dxchdf %>% gather(series,tbcat,-dt) %>% filter(series %in% c("bill","tech"))
+dailyplot(pltdf,"dt","tbcat",series="series",mtit="tbcat",ylab="Sum",vlines=totdates,backg=totback,ovsdate=min(xchdf$dt))
+```
+
+## Done
+
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```

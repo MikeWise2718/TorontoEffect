@@ -1,7 +1,7 @@
 ---
 title: "Read Chat Call Sessions and Merge 0.2"
 author: "Mike Wise"
-date: "25 April 2017"
+date: "26 April 2017"
 output: html_document
 ---
 
@@ -107,7 +107,7 @@ Plots created using ggplot2
 
 
 ```{r}
-addVlinesAndText <- function(vlines,gp){
+addVlinesAndText <- function(vlines,gp,hjust=0){
   if (is.null(vlines)) return(gp) # do nothing in this case
   
   # split the lines and convert to data.frame
@@ -123,7 +123,7 @@ addVlinesAndText <- function(vlines,gp){
   ldf$lab <- paste0("\n",ldf$lab) 
   # now actually add the verticle lines and the text 
   gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
-             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=0,angle=90)
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=hjust,angle=90)
   return(gp)
 }
 addBackground <- function(backg,gp){
@@ -131,7 +131,7 @@ addBackground <- function(backg,gp){
   gp <- gp + theme(panel.background = element_rect(fill = backg))
   return(gp)
 }
-dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL){
+dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,clrs=NULL,hjust=0){
   # Single series plot  with monthly breaks on the x-axis
   
   gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
@@ -139,7 +139,10 @@ dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NU
              xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
              scale_x_datetime("Date",breaks = date_breaks("1 months"),limits=c(sdate,edate))
 
-  gp <- addVlinesAndText(vlines,gp)
+  if (!is.null(clrs)){
+    gp <- gp + scale_color_manual(values=clrs)
+  }
+  gp <- addVlinesAndText(vlines,gp,hjust=hjust)
 
   gp <- addBackground(backg,gp)
 
@@ -167,7 +170,7 @@ readChatVolume <- function(frdate,todate,fname){
   dtd<- as.POSIXct(lcdf$DateHour,format="%m/%d/%Y",tz=tztz)
 
  # lcdf$temp_date<- as.POSIXct(lcdf$Date,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)
-  lcdf  <- lcdf %>% mutate( dnum = round(as.numeric(difftime(dtd,firstday,"days")))) %>%
+  lcdf  <- lcdf %>% mutate( dnum = round(as.numeric(difftime(dtd,firstday,units="days")))) %>%
                     mutate( hnum = dnum*24 + hour(dt))
     
   # restrict rows as different files sometimes have extra colums
@@ -177,14 +180,19 @@ readChatVolume <- function(frdate,todate,fname){
   elap <- as.numeric((Sys.time()-fstload)[1],units="secs")
   
   lcdf <- lcdf %>% filter( CountryCode=="USA" ) %>% arrange( dt )
+  lcdf <- lcdf %>% mutate( IsAB=grepl("^A&B",Subject)) %>%
+                   mutate( IsTk=grepl("^TS",Subject))
   
   # just need these columns and group by hour
-  lcdf <- lcdf[,c("dt","dnum","hnum","IsSMC","ChatsInBlock")]
+  lcdf <- lcdf[,c("dt","dnum","hnum","IsSMC","IsAB","IsTk","ChatsInBlock")]
   lcdf <- lcdf %>% group_by(hnum) %>%
                    summarize(dt=min(dt),dnum=min(dnum),
                              totchib=sum(ChatsInBlock),
                              winchib=sum((IsSMC=="True")*ChatsInBlock),
-                             xbxchib=sum((IsSMC=="False")*ChatsInBlock)) %>%
+                             xbxchib=sum((IsSMC=="False")*ChatsInBlock),
+                             xabchib=sum((IsSMC=="False")*IsAB*ChatsInBlock),
+                             xtkchib=sum((IsSMC=="False")*IsTk*ChatsInBlock)
+                             ) %>%
                    mutate(ChatsInBlock=NULL,IsSMC=NULL) %>%
                    arrange(hnum)
 
@@ -201,7 +209,7 @@ chdf <- chdf %>% arrange(hnum)
 chelap <- as.numeric((Sys.time()-chstload)[1],units="secs")
 print(sprintf("Loading chat data took %.1f secs",chelap))
 ```
-## Total call volume plots
+## Total chat volume plots
 
 ```{r fig.width=14, fig.height=6, echo=T}
 
@@ -213,6 +221,30 @@ ecdf <- chdf %>% group_by(dnum) %>%
 
 dailyplot(ecdf,"dt","chats",series="series",mtit="Total Chats",ylab="Chat Count",vlines=totdates,backg=totback)
 ```
+
+## Xbox chat volume plots
+
+```{r fig.width=14, fig.height=6, echo=T}
+
+ecdf <- chdf %>% group_by(dnum) %>% 
+                 summarise(dt=min(dt),
+                           xbox_total=sum(xbxchib),
+                           xbox_tech=sum(xtkchib),xbox_ab=sum(xabchib),
+                           xbox_diff=sum(xabchib)-sum(xtkchib)) %>%
+                 mutate( dnum=NULL ) %>% # delete dnum col
+                 gather(series,chats,-dt)
+clrs <- c("xbox_total"="blue","xbox_tech"="darkgreen","xbox_ab"="purple","xbox_diff"="red")
+
+dailyplot(ecdf,"dt","chats",series="series",mtit="Xbox Chat Breakdown by Tech/AB",ylab="Chat Count",vlines=xtotdates,backg=xbxback,clrs=clrs,hjust=0.5)
+```
+
+```{r fig.width=14, fig.height=6, echo=T}
+
+ecdf <- ecdf %>% filter(series=="xbox_diff")
+
+dailyplot(ecdf,"dt","chats",series="series",mtit="Xbox Chat Tech/AB Diff",ylab="Chat Count",vlines=xtotdates,backg=xbxback,clrs=clrs,hjust=1)
+```
+
 ## Read in call volume data
 
 ```{r}
@@ -225,7 +257,7 @@ readCallVolume <- function(frdate,todate,fname){
   dtd<- as.POSIXct(lcdf$Date,format="%m/%d/%Y",tz=tztz)
 
   lcdf  <- lcdf %>% mutate( dt = as.POSIXct(lcdf$DateHour,format="%m/%d/%Y %I:%M:%S %p",tz=tztz)) %>%
-                    mutate( dnum = round(as.numeric(difftime(dtd,firstday,"days")))) %>%
+                    mutate( dnum = round(as.numeric(difftime(dtd,firstday,units="days")))) %>%
                     mutate( hnum = dnum*24 + hour(dt)) %>%
                     arrange( dt ) # sort
 
@@ -244,6 +276,8 @@ readCallVolume <- function(frdate,todate,fname){
                    summarise(dt=min(dt),
                              dnum=min(dnum),
                              wincall=sum(WindowsCalls),
+                             xtkcall=sum(XboxTotalCalls),
+                             xabcall=sum(XboxABCalls),
                              xbxcall=sum(XboxTotalCalls+XboxABCalls)) %>%
                    mutate(totcall=wincall+xbxcall)
   return(lcdf)
@@ -267,7 +301,30 @@ ecdf <- cldf %>% group_by(dnum) %>%
                  mutate( dnum=NULL ) %>% # delete dnum col
                  gather(series,calls,-dt)
 
-dailyplot(ecdf,"dt","calls",series="series",mtit="Total Call Volumne - Windows vs. XBOX vs. XBOX AB",ylab="Call Count",vlines=totdates,backg=totback)
+dailyplot(ecdf,"dt","calls",series="series",mtit="Total Call Volumne - Windows vs. XBOX",ylab="Call Count",vlines=totdates,backg=totback)
+```
+
+
+## Xbox call volume plots
+
+```{r fig.width=14, fig.height=8, echo=T}
+
+ecdf <- cldf %>% group_by(dnum) %>% 
+                 summarise(dt=min(dt),xbox_total=sum(xtkcall+xabcall),
+                                      xbox_tech=sum(xtkcall),xbox_ab=sum(xabcall),
+                                      xbox_diff=sum(xabcall)-sum(xtkcall)) %>%
+                 mutate( dnum=NULL ) %>% # delete dnum col
+                 gather(series,calls,-dt)
+
+clrs <- c("xbox_total"="blue","xbox_tech"="darkgreen","xbox_ab"="purple","xbox_diff"="red")
+
+dailyplot(ecdf,"dt","calls",series="series",mtit="Xbox Call Breakdown by Tech/AB",ylab="Call Count",vlines=xtotdates,backg=xbxback,clrs=clrs,hjust=0.5)
+```
+
+
+```{r fig.width=14, fig.height=6, echo=T}
+ecdf <- ecdf %>% filter(series=="xbox_diff")
+dailyplot(ecdf,"dt","calls",series="series",mtit="Xbox Call Tech/AB Diff",ylab="Call Count",vlines=xtotdates,backg=xbxback,clrs=clrs,hjust=1)
 ```
 
 ## Read in SMC Active User/Session data
@@ -286,7 +343,7 @@ readSessionVolume <- function(frdate,todate,fname){
   dtd   <- as.POSIXct(temp_dstr,format="%Y-%m-%d",tz=tztz)
 
   svdf <- svdf %>% mutate( dt=as.POSIXct(temp_dstr,format="%Y-%m-%d %H",tz="UTC") ) %>%
-                   mutate( dnum=round(as.numeric(difftime(dtd,firstday,"days"))) ) %>%
+                   mutate( dnum=round(as.numeric(difftime(dtd,firstday,units="days"))) ) %>%
                    mutate( hnum  = dnum*24 + hour(dt) )
 
   n1 <- nrow(svdf)
@@ -314,7 +371,7 @@ print(sprintf("Loading Session data took %.1f secs",sselap))
 
 
 # Merge 
-```{r echo=F}
+```{r echo=T}
 cccc <- inner_join(chdf,cldf,by="hnum",suffix=c(".chat",".call"))
 print(sprintf("call-chat join merged %d x %d rows to %d rows",nrow(chdf),nrow(cldf),nrow(cccc)))
 
@@ -329,14 +386,18 @@ print(sprintf("dnum mismatches:%d",sum(tdf$dnum.chat!=tdf$dnum)))
 ```
 
 # Re-order the columns and then Write it out
-```{r echo=F}
-condf <- tdf[,c("dt","dnum","hnum","totchib","winchib","xbxchib","totcall","wincall","xbxcall","actsess","actuser")]
+```{r echo=T}
+condf <- tdf[,c("dt","dnum","hnum","totchib","winchib","xbxchib","xtkchib","xabchib",
+                                   "totcall","wincall","xbxcall","xtkcall","xabcall",
+                                   "actsess","actuser")]
 tfname <- sprintf("%s/%s",fpath,"colsolidatedTorontoData02.csv")
 write.csv(tdf,tfname)
-print(sprintf("Wrote %d rows to %s",nrow(tdf),tfname))
+print(sprintf("Wrote %d rows and %d cols to %s",nrow(tdf),ncol(tdf),tfname))
 dcondf <- condf %>% group_by(dnum) %>% summarise(dt=min(dt),
                                                  totchib=sum(totchib),winchib=sum(winchib),xbxchib=sum(xbxchib),
+                                                 xtkchib=sum(xtkchib),xabchib=sum(xabchib),
                                                  totcall=sum(totcall),wincall=sum(wincall),xbxcall=sum(xbxcall),
+                                                 xtkcall=sum(xtkcall),xabcall=sum(xabcall),
                                                  actsess=sum(actsess),actuser=sum(actuser)
                                                  )
 ```

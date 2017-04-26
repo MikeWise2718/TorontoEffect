@@ -1,0 +1,65 @@
+---
+title: "XBOX Chat Data 0.1"
+author: "Mike Wise"
+date: "26 April 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Data pre-processed and analyzied from call volume logs and web logs by Marcus Collins. 
+
+Analysis based on R-Scripts from Jacob LaRiviere.
+
+R-Markdown and plots from Mike Wise.
+
+## Library Initialization
+```{r, message=F}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+```
+
+#### Set random seeds, record start time and version.
+
+```{r}
+set.seed(1234)
+version <-0.1
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+```
+
+#### Various constants
+
+```{r}
+tztz <- "UTC"  # Apparently all of our time zones are UTC...
+firstday <- as.POSIXct("2015-01-01",tz=tztz)  # we will count days from the first day in 2015
+
+smcdates <- c("2016-08-17/red/0-30%","2016-09-1/red/30-50%","2016-09-07/red/50-100%")
+xtotdates <- c("2016-10-11/purple/0-10%","2016-10-18/purple/10-30%","2016-11-01/purple/30-50%","2016-12-15/purple/50-90%",
+              "2016-11-17/blue/content change")
+totdates <- c(smcdates,xtotdates)
+smcback <- "lightsteelblue1"
+xbxback <- "darkseagreen2"
+xabback <- "darkseagreen3"
+totback <- "wheat"
+
+fpath <- "TorontoData"
+sdate <- as.POSIXct("2016-06-01",tz=tztz)
+mdate <- as.POSIXct("2017-01-01",tz=tztz)
+edate <- as.POSIXct("2017-02-01",tz=tztz)
+```
+
+
+## Done
+
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```
