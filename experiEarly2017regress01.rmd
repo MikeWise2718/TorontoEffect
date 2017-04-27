@@ -1,0 +1,441 @@
+---
+title: "Experiments Early 2017 - Plot Visualzations"
+author: "Mike Wise"
+date: "27 April 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+hook_output <- knitr::knit_hooks$get("output")
+knitr::knit_hooks$set(output=function(x,options){
+  xn <- hook_output(x,options)
+  # interestingly xn is a big character string. 
+  # I had expected a list or vector, but the length of x is 1 and the class is character.
+
+  # The following regexp extracts the parameters from a statement of the form
+  # htmlesc<<(pat1,pat2)>> and converts it to <pat1>pat2</pat1>
+  xn <- gsub("## htmlesc<<([^,]*),{1}([^>>]*)>>","\n```\n<\\1>\\2</\\1>\n```\n",xn)
+  # now remove double escaped lines that occur when we do these right after each other
+  gsub(">\n```\n\n\n```\n<",">\n<",xn)
+}
+)
+
+hook_warn <- knitr::knit_hooks$get("warning")
+knitr::knit_hooks$set(warning = function(x,options){
+  xn <- hook_warn(x,options)
+  xn <- NULL
+  xn
+}
+)
+```
+
+Data pre-processed and analyzied from call volume logs and web logs by Marcus Collins. 
+
+Analysis based on R-Scripts from Jacob LaRiviere.
+
+R-Markdown, regression code, and plots from Mike Wise.
+
+## Library Initialization
+```{r, message=F}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+library(gridExtra,quietly=T,warn.conflicts = F)
+
+options(warn=-1) # get rid of tiresome mismatched timezone warnings (I know already)
+```
+
+#### Set random seeds, record start time and version.
+
+```{r}
+set.seed(1234)
+version <-0.2
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+```
+
+#### Various constants
+
+```{r}
+tztz <- "UTC"            # these are for server log datetimes
+tzbk <- "US/Pacific"     # these are for mostly datetimes reported by people
+
+firstday <- as.POSIXct("2015-01-01",tz=tztz)  # we will count days from the first day in 2015
+
+
+smcb1dates <- c("2017-03-08 06:03/blue/-ok-/2017-03-08 07:57",
+                "2017-03-11 08:01/blue/-ok-/2017-03-11 09:00",
+                "2017-03-14 01:02/blue/-ok-/2017-03-14 03:10",
+                "2017-03-15 06:11/blue/-ok-/2017-03-15 08:24",
+                "2017-03-18 08:04/blue/-ok-/2017-03-18 09:08",
+                "2017-03-20 06:04/blue/-ok-/2017-03-20 08:02")
+
+smcb2dates <- c("2017-04-17 06:00/purple/-ok-/2017-04-17 08:00",
+                "2017-04-17 19:00/purple/-ok-/2017-04-17 20:00",
+                "2017-04-18 01:00/purple/-ok-/2017-04-18 03:00",
+                "2017-04-18 17:00/purple/-ok-/2017-04-18 18:00",
+                "2017-04-19 06:00/purple/- turned back on for 15 min -/2017-04-19 08:00",
+                "2017-04-19 20:00/purple/-ok-/2017-04-19 21:00",
+                "2017-04-20 13:25/purple/- not hourly aligned -/2017-04-20 14:30",
+                "2017-04-22 08:00/purple/- missed? -/2017-04-22 09:00",
+                "2017-04-22 20:30/purple/- not hourly aligned -/2017-04-22 21:30",
+                "2017-04-23 06:00/purple/-ok-/2017-04-23 07:00",
+                "2017-04-23 19:00/purple/-ok-/2017-04-23 20:00")
+
+smcb1sdate <- as.POSIXct("2017-03-08",tz=tzbk)
+smcb1edate <- smcb1sdate+14*24*3600
+
+smcb2sdate <- as.POSIXct("2017-04-17",tz=tzbk)
+smcb2edate <- smcb2sdate+8*24*3600
+
+totdates <- c(smcb1dates,smcb2dates)
+
+smcback <- "lightsteelblue1"
+xbxback <- "darkseagreen2"
+xabback <- "darkseagreen3"
+totback <- "wheat"
+
+fpath <- "TorontoData1"
+sdate <- as.POSIXct("2017-03-08",tz=tztz)
+edate <- as.POSIXct("2017-04-24",tz=tztz)
+```
+
+#### Misc utility functions
+
+```{r}
+
+s2date <- function(strdate){
+  return(as.POSIXct(strdate,tz=tzbk))
+}
+crackdate <- function(datestr){
+  sar <- unlist(strsplit(datestr,"/"))
+  ssdate <- sar[[1]]
+  sdate <- s2date(ssdate)
+  if (length(sar)>=4){
+    sedate <- sar[[4]]
+    edate <- s2date(sedate)
+  } else {
+    sedate <- NULL
+    edate <- NULL
+  }
+  val <- 0
+  sval <- sar[[3]]
+  levpart <- sar[[3]]
+  pctpresent <- F
+  if (grepl("%",levpart)){
+    if (grepl("-",levpart)){
+      levpart <- gsub("%","",levpart)
+      val <- as.numeric(unlist(strsplit(levpart,"-"))[[2]])
+      sval <- gsub("-","_",levpart)
+      pctpresent <- T
+    }
+  }
+  return(list(sdate=sdate,ssdate=ssdate,edate=edate,sedate=sedate,val=val,sval=sval,pctpresent=pctpresent))
+}
+
+addStepDateToVek <- function(dates,idx,dtvek,vvek){
+  cd1 <- crackdate(dates[[idx]])
+  if (!cd1$pctpresent){
+    # if there is no % don't do anything
+    return(vvek)
+  }
+  dt1 <- cd1$date
+  if (idx<length(dates)){
+    cd2 <- crackdate(dates[[idx+1]])
+    dt2 <- cd2$sdate
+  } else {
+    dt2 <- max(dtvek)
+  }
+  #print("addstepdate")
+  #print(dt1)
+  #print(dt2)
+  val <- cd1$val
+  tochg <-  dt1<=dtvek & dtvek<= dt2
+  vvek[ tochg ] <- val
+  #print(sprintf("changed %d values to %d",sum(tochg),val))
+  return(vvek)
+}
+getStepDates <- function(dates,dtvek){
+ vvek <- rep(0,length(dtvek))
+ for (i in 1:length(dates)){
+   vvek <- addStepDateToVek(dates,i,dtvek,vvek)
+ }
+ return(vvek)
+}
+getSmcStepDates <- function(dtvek){
+ return(getStepDates(smcdates,dtvek))
+}
+getXabStepDates <- function(dtvek){
+ return(getStepDates(xbxdates,dtvek))
+}
+```
+
+
+#### Plot Functions
+
+Plots created using ggplot2
+
+
+```{r}
+addVlines2AndText <- function(vlines,gp,hjust=0){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab","dt2")
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tzbk)
+  ldf$fdt <- format(ldf$dt,format="%Y-%m-%d   %H%:%M %Z")
+  ldf$ndt <- as.numeric(ldf$dt)
+  ldf$dt2 <- as.POSIXct(ldf$dt2,tz=tzbk)
+  ldf$fdt2 <- format(ldf$dt2,format="%Y-%m-%d   %H%:%M %Z")
+  ldf$ndt2 <- as.numeric(ldf$dt2)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+
+  olab <- ldf$lab
+  ldf$lab <- sprintf("\n%s  %s",ldf$fdt,olab)
+  ldf$lab2 <- sprintf("\n%s  %s",ldf$fdt2,olab)
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) + geom_vline(xintercept=ldf$ndt2,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=hjust,angle=90,na.rm=T) +
+             annotate(geom="text",x=ldf$dt2,y=0,label=ldf$lab2,color=ldf$clr,hjust=hjust,angle=90,na.rm=T)
+  return(gp)
+}
+addVlinesAndText <- function(vlines,gp,hjust=0){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab")
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tztz)
+  ldf$ndt <- as.numeric(ldf$dt)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+  
+  ldf$lab <- paste0("\n",ldf$lab) 
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=hjust,angle=90,na.rm=T)
+  return(gp)
+}
+addBackground <- function(backg,gp){
+  if (is.null(backg)) return(gp) # do nothing in this case
+  gp <- gp + theme(panel.background = element_rect(fill = backg))
+  return(gp)
+}
+overdate <- function(ovdate,defdate){
+  # date override
+  rv <- defdate
+  if (!is.null(ovdate)) { 
+    rv <- ovdate
+  }
+  return(rv)
+}
+dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,vlines2=NULL,backg=NULL,series=NULL,clrs=NULL,
+                      hjust=0,rotxaxtxt=0,ovsdate=NULL,ovedate=NULL,dfmt="%Y-%m-%d",addpoints=F,customscale=T){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  if (customscale){
+    ddf <- ddf %>% filter( dpsdate<=dt & dt<=dpedate )
+  }
+  
+  
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_line(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks("1 days"),
+                              limits=c(dpsdate,dpedate),date_label=dfmt)
+
+  if (addpoints){
+    gp <- gp + geom_point(aes_string(color=series),na.rm=T)
+  }
+  if (!is.null(clrs)){
+    gp <- gp + scale_color_manual(values=clrs)
+  }
+  gp <- addVlinesAndText(vlines,gp,hjust=hjust)
+  gp <- addVlines2AndText(vlines2,gp,hjust=hjust)
+
+  gp <- addBackground(backg,gp)
+  
+  if (rotxaxtxt!=0){
+    gp <- gp + theme(axis.text.x = element_text(angle = rotxaxtxt, hjust = 0))
+  }
+
+  return(gp)
+}
+```
+## Read in consolidated chat, call, and session volume data
+
+```{r}
+stload <- Sys.time()
+tfname <- sprintf("%s/%s",fpath,"consolidatedEarly2017TorontoData01.csv")
+condf <- read.csv(tfname)
+
+# minsessfilt <- 5000
+# nbef <- nrow(condf)
+# condf <- condf %>% filter(minsessfilt<actsess)
+# naft <- nrow(condf)
+# print(sprintf("Filtered %d of %d hours because sessions less than %d",(nbef-naft),naft,minsessfilt))
+condf <- condf %>% mutate( dt = as.POSIXct(dt,tz=tztz) ) %>%
+                   mutate( log_winchib = log(winchib) ) %>%
+                   mutate( log_wincall = log(wincall) ) %>%
+                   mutate( log_xbxchib = log(xbxchib) ) %>%
+                   mutate( log_xbxcall = log(xbxcall) ) %>%
+                   mutate( rate_winchib = winchib/actsess ) %>%
+                   mutate( rate_wincall = wincall/actsess ) %>%
+                   mutate( rate_xbxchib = xbxchib/actsess ) %>%
+                   mutate( rate_xtkchib = xtkchib/actsess ) %>%
+                   mutate( rate_xabchib = xabchib/actsess ) %>%
+                   mutate( rate_xbxcall = xbxcall/actsess ) %>%
+                   mutate( rate_xtkcall = xtkcall/actsess ) %>%
+                   mutate( rate_xabcall = xabcall/actsess ) %>%
+                   mutate( xbxchibdiff = xabchib-xtkchib ) %>%
+                   mutate( xbxcalldiff = xabcall-xtkcall ) %>%
+                   mutate( rate_xbxchibdiff = rate_xabchib-rate_xtkchib ) %>%
+                   mutate( rate_xbxcalldiff = rate_xabcall-rate_xtkcall ) 
+
+# dcondf <- condf %>% group_by(dnum) %>% summarise(dt=min(dt),
+#                                                  totchib=sum(totchib),winchib=sum(winchib),xbxchib=sum(xbxchib),
+#                                                  totcall=sum(totcall),wincall=sum(wincall),xbxcall=sum(xbxcall),
+#                                                  actsess=sum(actsess),actuser=sum(actuser)
+#                                                  )
+
+elap <- as.numeric((Sys.time()-stload)[1],units="secs")
+print(sprintf("Loading consolidated data took %.1f secs",elap))
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("totchib","winchib","xbxchib"))
+dailyplot(pltdf,"dt","chib",series="series",mtit="Chats In Block",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,call,-dt) %>% filter(series %in% c("totcall","wincall","xbxcall"))
+dailyplot(pltdf,"dt","call",series="series",mtit="Calls",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,active,-dt) %>% filter(series %in% c("actsess","actuser"))
+dailyplot(pltdf,"dt","active",series="series",mtit="Sessions",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+
+## SMC Chats and Calls
+
+```{r fig.width=14, fig.height=6, echo=T}
+iplt <- 1
+getmtit <- function(mtit,chkdt){
+  nmtit <- sprintf("%d - %s -  %s",iplt,mtit,chkdt$ssdate)
+  iplt <<- iplt+1
+  nmtit
+}
+
+justdoone <- F
+getstodo <- function(){
+  if (justdoone){
+    return(smcb1dates[1])
+  }
+  return(c(smcb1dates,smcb2dates))
+}
+
+stodo <- getstodo()
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("winchib","wincall"))
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("SMB Chats and Calls",ckdt),ylab="Sum",
+                  vlines2=sdt,backg=smcback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",addpoints=T,
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+
+## XBox Chats
+
+```{r fig.width=14, fig.height=6, echo=T}
+stodo <- getstodo()
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("xbxchib","xtkchib","xabchib","xbxchibdiff"))
+  clrs <- c("xbxchib"="blue","xtkchib"="darkgreen","xabchib"="purple","xbxchibdiff"="red")
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Chats In Block",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
+                  vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+## XBox Calls
+
+```{r fig.width=14, fig.height=6, echo=T}
+stodo <- getstodo()
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("xbxcall","xtkcall","xabcall","xbxcalldiff"))
+  clrs <- c("xbxcall"="blue","xtkcall"="darkgreen","xabcall"="purple","xbxcalldiff"="red")
+  
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Calls",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
+                  vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+## SMC Chat and Call Rates
+
+```{r fig.width=14, fig.height=6, echo=T}
+stodo <- getstodo()
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("rate_winchib","rate_wincall"))
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("SMB Chat and Call Rates",ckdt),ylab="Sum",addpoints=T,
+                  vlines2=sdt,backg=smcback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+## XBox Chat Rates
+
+```{r fig.width=14, fig.height=6, echo=T}
+stodo <- getstodo()
+clrs <- c("rate_xbxchib"="blue","rate_xtkchib"="darkgreen","rate_xabchib"="purple","rate_xbxchibdiff"="red")
+
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("rate_xbxchib","rate_xtkchib","rate_xabchib","rate_xbxchibdiff"))
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Chat Rates",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
+                  vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+# XBox Call Rates
+
+```{r fig.width=14, fig.height=6, echo=T}
+stodo <- getstodo()
+clrs <- c("rate_xbxcall"="blue","rate_xtkcall"="darkgreen","rate_xabcall"="purple","rate_xbxcalldiff"="red")
+
+for (sdt in stodo){
+  ckdt <- crackdate(sdt)
+  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("rate_xbxcall","rate_xtkcall","rate_xabcall","rate_xbxcalldiff"))
+  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Call Rates",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
+                  vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
+                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
+}
+```
+
+## Done
+
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```
