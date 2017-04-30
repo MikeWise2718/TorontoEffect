@@ -1,7 +1,7 @@
 ---
-title: "Experiments Early 2017 - Plot Visualzations"
+title: "Experiments Early 2017 - DID Regresion"
 author: "Mike Wise"
-date: "27 April 2017"
+date: "28 April 2017"
 output: html_document
 ---
 
@@ -42,7 +42,9 @@ R-Markdown, regression code, and plots from Mike Wise.
 library(tidyverse,quietly=T,warn.conflicts=F)
 library(lubridate,quietly=T,warn.conflicts=F)
 library(scales,quietly=T,warn.conflicts=F)
-library(gridExtra,quietly=T,warn.conflicts = F)
+library(gridExtra,quietly=T,warn.conflicts=F)
+library(lmtest,quietly=T,warn.conflicts=F)
+library(sandwich,quietly=T,warn.conflicts=F)
 
 options(warn=-1) # get rid of tiresome mismatched timezone warnings (I know already)
 ```
@@ -51,7 +53,7 @@ options(warn=-1) # get rid of tiresome mismatched timezone warnings (I know alre
 
 ```{r}
 set.seed(1234)
-version <-0.2
+version <-0.1
 versionstring <- sprintf("Version %.1f",version)
 
 starttime <- Sys.time()
@@ -68,6 +70,13 @@ tzbk <- "US/Pacific"     # these are for mostly datetimes reported by people
 
 firstday <- as.POSIXct("2015-01-01",tz=tztz)  # we will count days from the first day in 2015
 
+round_to_hour<-function(x,precision=3600){
+  m<-minute(x)+second(x)/60
+  m.r<- round(m/precision)*precision
+  minute(x)<-m.r
+  second(x)<-0
+  x
+}
 
 smcb1dates <- c("2017-03-08 06:03/blue/-ok-/2017-03-08 07:57",
                 "2017-03-11 08:01/blue/-ok-/2017-03-11 09:00",
@@ -117,9 +126,11 @@ crackdate <- function(datestr){
   sar <- unlist(strsplit(datestr,"/"))
   ssdate <- sar[[1]]
   sdate <- s2date(ssdate)
+  shdate <- round_to_hour(sdate)
   if (length(sar)>=4){
     sedate <- sar[[4]]
     edate <- s2date(sedate)
+    ehdate <- round_to_hour(edate)
   } else {
     sedate <- NULL
     edate <- NULL
@@ -136,7 +147,7 @@ crackdate <- function(datestr){
       pctpresent <- T
     }
   }
-  return(list(sdate=sdate,ssdate=ssdate,edate=edate,sedate=sedate,val=val,sval=sval,pctpresent=pctpresent))
+  return(list(sdate=sdate,ssdate=ssdate,edate=edate,sedate=sedate,val=val,sval=sval,pctpresent=pctpresent,shdate=shdate,ehdate=ehdate))
 }
 
 addStepDateToVek <- function(dates,idx,dtvek,vvek){
@@ -172,7 +183,7 @@ getSmcStepDates <- function(dtvek){
  return(getStepDates(smcdates,dtvek))
 }
 getXabStepDates <- function(dtvek){
- return(getStepDates(xbxdates,dtvek))
+ return(getStepDates(totdates,dtvek))
 }
 ```
 
@@ -217,7 +228,7 @@ addVlinesAndText <- function(vlines,gp,hjust=0){
   # the following reforms the date strings into a data.frame for geom_vline
   ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
   names(ldf) <- c("dt","clr","lab")
-  ldf$dt <- as.POSIXct(ldf$dt,tz=tztz)
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tzbk)
   ldf$ndt <- as.numeric(ldf$dt)
   # add a newline to the front so as to display the text 
   # this keeps the text from writing on top of the vline
@@ -278,6 +289,34 @@ dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,vlines2=
 
   return(gp)
 }
+residplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,ovsdate=NULL,ovedate=NULL){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  brkctrl <- "1 month"
+  dltdays <- difftime(dpedate,dpsdate,"days") 
+  if (dltdays<30) brkctrl <- "1 day"
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_point(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks(brkctrl),limits=c(dpsdate,dpedate)) +
+             theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+  gp <- addVlinesAndText(vlines,gp)
+
+  gp <- addBackground(backg,gp)
+  
+  hp <- ggplot(ddf) + geom_histogram(aes_string(x=y),bins=30)
+  hp <- addBackground(backg,hp)
+  
+  ghp <- grid.arrange(gp, hp, ncol=2,widths = c(2,1))
+
+  return(ghp)
+}
 ```
 ## Read in consolidated chat, call, and session volume data
 
@@ -331,7 +370,168 @@ pltdf <- condf %>% gather(series,active,-dt) %>% filter(series %in% c("actsess",
 dailyplot(pltdf,"dt","active",series="series",mtit="Sessions",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
 ```
 
-## SMC Chats and Calls
+## regression code
+
+```{r fig.width=14, fig.height=6, echo=T}
+results1 <- list()
+results2 <- list()
+initResults <- function(){
+  results1 <<- list()
+  results2 <<- list()
+}
+  
+addToResults1 <- function(newresults){
+  results1[[length(results1)+1]] <<- newresults
+}
+addToResults2 <- function(newresults){
+  results2[[length(results2)+1]] <<- newresults
+}
+listtodf <- function(lst){
+  nr <- length(lst)    # rows
+  if (nr==0) return(NULL)
+  nvek <- names(lst[[1]])
+  nc <- length(nvek)   # columns
+  df <- data.frame(idx=1:nr) # preallocate length
+  for (i in 1:nc){
+    iname <- nvek[i]
+    df[[iname]] <- sapply(lst,`[[`,iname)
+  }
+  return(df)
+}
+getResults1 <- function(){
+  return(listtodf(results1))
+}
+getResults2 <- function(){
+  return(listtodf(results2))
+}
+
+getregdfdid <- function(df,vname,dates,befdays,aftdays){
+  sdate <- NA
+  edate <- NA
+  for (d1 in dates){
+    crk <- crackdate(d1)
+    sdate <- min(crk$shdate,sdate,na.rm=T)
+    edate <- max(crk$ehdate,edate,na.rm=T)
+  }
+  discdate <- crk$shdate
+  #print(sprintf("discdate:%s",discdate))
+  # filter on time
+
+  sregdate <- sdate - days(befdays)
+  eregdate <- edate + days(aftdays)
+  
+  print(sprintf("getregdf2 - sdate:%s edate:%s sregdate:%s eregdate:%s",
+                             sdate,edate,sregdate,eregdate))
+
+  
+  df <- df %>% filter( sregdate <= dt & dt <= eregdate) 
+  
+  df <- df %>% mutate( hour=as.factor(hour(dt)) ) %>%
+               mutate( dow=as.factor(wday(dt))) %>%  
+               mutate( idx=1:nrow(df) ) %>%
+               mutate( lin0=1 ) %>%
+               mutate( turnedoff=0 )
+
+  for (d1 in dates){
+    crk <- crackdate(d1)
+    scutidx <- which(df$dt==crk$shdate)
+    ecutidx <- which(df$dt==crk$ehdate)
+    df <- df %>% mutate( turnedoff=if_else(scutidx<=idx & idx<=ecutidx,1,turnedoff) ) 
+  }
+  return(df)
+}
+
+formlist = list(
+  formel1="%s ~ hour + dow + lin1 + lin2 + postchange",
+  formel2a="%s ~ hour * dow - 1",
+  formel2b="%s ~ lin1 + lin2 + postchange",
+  formel2c="%s ~ turnedoff"
+#  formel2b="%s ~ lin0 + postchange"
+)
+doregressiondid <- function(df,vname,formel,dates,befdays,aftdays){
+
+  df <- getregdfdid(df,vname,dates,befdays,aftdays)
+  formstr <- sprintf(formlist[[formel]],vname)
+  form <- as.formula(formstr)
+  fit <- glm(form,data=df)
+  summary_fit <- summary(fit)
+  coeftest_fit <- coeftest(fit, vcov = vcovHC(fit, "HC1"))
+  if (verbose>2){
+    print(summary_fit)
+  }
+  if (verbose>1){
+    print(coeftest_fit)
+  }
+  df$resid <- resid(fit)
+  df$predicted <-  df[[vname]]-df$resid
+  # for debugging
+  ffit <<- fit
+  sfit <<- summary_fit
+  cfit <<- coeftest_fit
+  return(list(df=df,formstr=formstr,fit=fit,sfit=summary_fit,cfit=coeftest_fit))
+}
+regress1did <- function(df,vname,area,backg,dates,chgdate,mtit1,befdays=7,aftdays=7,model="model1"){
+  crk <- crackdate(chgdate)
+  idx <- length(results1)+1
+  
+  htit <- sprintf("%d - Regression for %s %s on %s",idx,vname,model,chgdate)
+  cat(sprintf("htmlesc<<h2,%s>>\n",htit))
+
+  rv <- doregressiondid(df,vname,"formel1",dates,befdays,aftdays)
+  if (verbose>0){
+    df1 <- rv$df %>%  gather_("series",vname,c(vname,"predicted"))
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv$formstr)
+    plt <- dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    print(plt)
+    mtit <- sprintf("%d - Residuals - %s - %s",idx,mtit1,rv$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+  rescoef <- "turnedoff"
+}
+regress2did <- function(df,vname,area,backg,dates,chgdate,mtit1,befdays=7,aftdays=7,model="model2"){
+
+  idx <- 1
+  
+ # htit <- sprintf("%d - Regression for %s %s on %s",idx,vname,model,chgdate)
+#  cat(sprintf("htmlesc<<h2,%s>>\n",htit))
+
+  # step 1
+  rv1 <- doregressiondid(df,vname,"formel2a",dates,befdays,aftdays)
+  if (verbose>0){
+    df1 <- rv1$df %>%  gather_("series",vname,c(vname,"predicted"))
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv1$formstr)
+    plt <- dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    print(plt)
+    mtit <- sprintf("%d - Step 1 Residuals - %s - %s",idx,mtit1,rv1$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+
+  # step 2
+  df2 <- rv1$df
+  df2$step1residuals <- rv1$fit$residuals
+  vname2 <- "step1residuals"
+  rv2 <- doregressiondid(df2,vname2,"formel2c",dates,7,7)
+  if (verbose>0){
+    df1 <- rv2$df %>%  gather_("series",vname2,c(vname2,"predicted"))
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv2$formstr)
+    plt <- dailyplot(df1,"dt",vname2,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    print(plt)
+    mtit <- sprintf("%d - Step 2 Residuals - %s - %s",idx,mtit1,rv2$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+  rescoef <- "turnedoff"
+
+}
+```
+
+
+## XBox Chats
 
 ```{r fig.width=14, fig.height=6, echo=T}
 iplt <- 1
@@ -341,7 +541,7 @@ getmtit <- function(mtit,chkdt){
   nmtit
 }
 
-justdoone <- F
+justdoone <- T
 getstodo <- function(){
   if (justdoone){
     return(smcb1dates[1])
@@ -349,29 +549,19 @@ getstodo <- function(){
   return(c(smcb1dates,smcb2dates))
 }
 
-stodo <- getstodo()
-for (sdt in stodo){
-  ckdt <- crackdate(sdt)
-  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("winchib","wincall"))
-  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("SMB Chats and Calls",ckdt),ylab="Sum",
-                  vlines2=sdt,backg=smcback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",addpoints=T,
-                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
-}
-```
+verbose <- 2
+tzbk <- tztz
 
 
-## XBox Chats
-
-```{r fig.width=14, fig.height=6, echo=T}
-stodo <- getstodo()
-for (sdt in stodo){
-  ckdt <- crackdate(sdt)
-  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("xbxchib","xtkchib","xabchib","xbxchibdiff"))
-  clrs <- c("xbxchib"="blue","xtkchib"="darkgreen","xabchib"="purple","xbxchibdiff"="red")
-  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Chats In Block",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
-                  vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
-                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
-}
+pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("xbxchib","xtkchib","xabchib","xbxchibdiff"))
+clrs <- c("xbxchib"="blue","xtkchib"="darkgreen","xabchib"="purple","xbxchibdiff"="red")
+print(dailyplot(pltdf,"dt","chib",series="series",mtit="XBOX Chats In Block",ylab="Sum",addpoints=T,clrs=clrs,
+                vlines2=totdates,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z"))
+                
+vname <- "xbxchibdiff"
+atit <- sprintf("Xbox")
+sdt <- NULL
+regress2did(condf,vname,"Xbox",xbxback,totdates,sdt,atit,befdays=14,aftdays=14) 
 ```
 
 ## XBox Calls
@@ -385,20 +575,6 @@ for (sdt in stodo){
   
   print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("XBOX Calls",ckdt),ylab="Sum",addpoints=T,clrs=clrs,
                   vlines2=sdt,backg=xbxback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
-                  ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
-}
-```
-
-## SMC Chat and Call Rates
-
-```{r fig.width=14, fig.height=6, echo=T}
-stodo <- getstodo()
-for (sdt in stodo){
-  ckdt <- crackdate(sdt)
-
-  pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("rate_winchib","rate_wincall"))
-  print(dailyplot(pltdf,"dt","chib",series="series",mtit=getmtit("SMB Chat and Call Rates",ckdt),ylab="Sum",addpoints=T,
-                  vlines2=sdt,backg=smcback,rotxaxtxt=-30,dfmt="%Y-%m-%d %H:%M %Z",
                   ovsdate=(ckdt$sdate-14*3600),ovedate=(ckdt$edate+14*3600)))
 }
 ```

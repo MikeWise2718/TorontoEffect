@@ -102,7 +102,7 @@ sdate <- s2date("2016-06-01")
 mdate <- s2date("2017-01-01")
 edate <- s2date("2017-03-07")
 verbose <- 2
-justdoone <- F # for testing
+justdoone <- T # for testing
 ```
 
 #### Misc utility functions
@@ -256,7 +256,7 @@ residplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NU
 
 ```{r}
 stload <- Sys.time()
-tfname <- sprintf("%s/%s",fpath,"colsolidatedTorontoData01.csv")
+tfname <- sprintf("%s/%s",fpath,"colsolidatedTorontoData02.csv")
 condf <- read.csv(tfname)
 
 minsessfilt <- 5000
@@ -363,6 +363,7 @@ getregdf <- function(df,vname,discdate,befdays,aftdays,dates){
                  mutate( lin2=if_else(idx<cutidx,0L,idx-cutidx)) %>%
                  mutate( lin0=1 ) %>%
                  mutate( postchange=if_else(idx<cutidx,0L,1L) )
+  df <- df[complete.cases(df),]
 
   return(df)
 }
@@ -384,7 +385,8 @@ doregression <- function(df,vname,formel,chgdate,befdays,aftdays){
     print(coeftest_fit)
   }
   df$resid <- resid(fit)
-  df$predicted <-  df[[vname]]-df$resid
+  #df$predicted <-  df[[vname]]-df$resid
+  df$predicted <-  predict(fit,df)
   # for debugging
   ffit <<- fit
   sfit <<- summary_fit
@@ -511,7 +513,7 @@ regressoverdates <- function(model,df,vname,area,title,befdays=7,aftdays=7){
 ```{r fig.width=14, fig.height=6, echo=T}
 initResults()
 
-justdoone <- F # for testing
+justdoone <- T # for testing
 verbose <- 2
 
 m <- "model2"

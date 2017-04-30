@@ -1,0 +1,561 @@
+---
+title: "Experiments Early 2017 - DID Regresion"
+author: "Mike Wise"
+date: "28 April 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+hook_output <- knitr::knit_hooks$get("output")
+knitr::knit_hooks$set(output=function(x,options){
+  xn <- hook_output(x,options)
+  # interestingly xn is a big character string. 
+  # I had expected a list or vector, but the length of x is 1 and the class is character.
+
+  # The following regexp extracts the parameters from a statement of the form
+  # htmlesc<<(pat1,pat2)>> and converts it to <pat1>pat2</pat1>
+  xn <- gsub("## htmlesc<<([^,]*),{1}([^>>]*)>>","\n```\n<\\1>\\2</\\1>\n```\n",xn)
+  # now remove double escaped lines that occur when we do these right after each other
+  gsub(">\n```\n\n\n```\n<",">\n<",xn)
+}
+)
+
+hook_warn <- knitr::knit_hooks$get("warning")
+knitr::knit_hooks$set(warning = function(x,options){
+  xn <- hook_warn(x,options)
+  xn <- NULL
+  xn
+}
+)
+```
+
+Data pre-processed and analyzied from call volume logs and web logs by Marcus Collins. 
+
+Analysis based on R-Scripts from Jacob LaRiviere.
+
+R-Markdown, regression code, and plots from Mike Wise.
+
+## Library Initialization
+```{r, message=F}
+library(tidyverse,quietly=T,warn.conflicts=F)
+library(lubridate,quietly=T,warn.conflicts=F)
+library(scales,quietly=T,warn.conflicts=F)
+library(gridExtra,quietly=T,warn.conflicts=F)
+library(lmtest,quietly=T,warn.conflicts=F)
+library(sandwich,quietly=T,warn.conflicts=F)
+
+options(warn=-1) # get rid of tiresome mismatched timezone warnings (I know already)
+```
+
+#### Set random seeds, record start time and version.
+
+```{r}
+set.seed(1234)
+version <-0.2
+versionstring <- sprintf("Version %.1f",version)
+
+starttime <- Sys.time()
+startfmttime <- sprintf(format(starttime, "%d %b %Y - %H:%M:%S"))
+
+print(sprintf("%s created on %s",versionstring,startfmttime))
+```
+
+#### Various constants
+
+```{r}
+tztz <- "UTC"            # these are for server log datetimes
+tzbk <- "US/Pacific"     # these are for mostly datetimes reported by people
+
+firstday <- as.POSIXct("2015-01-01",tz=tztz)  # we will count days from the first day in 2015
+
+round_to_hour<-function(x,precision=3600){
+  m<-minute(x)+second(x)/60
+  m.r<- round(m/precision)*precision
+  minute(x)<-m.r
+  second(x)<-0
+  x
+}
+
+smcb1dates <- c("2017-03-08 06:03/blue/-ok-/2017-03-08 07:57",
+                "2017-03-11 08:01/blue/-ok-/2017-03-11 09:00",
+                "2017-03-14 01:02/blue/-ok-/2017-03-14 03:10",
+                "2017-03-15 06:11/blue/-ok-/2017-03-15 08:24",
+                "2017-03-18 08:04/blue/-ok-/2017-03-18 09:08",
+                "2017-03-20 06:04/blue/-ok-/2017-03-20 08:02")
+
+smcb2dates <- c("2017-04-17 06:00/purple/-ok-/2017-04-17 08:00",
+                "2017-04-17 19:00/purple/-ok-/2017-04-17 20:00",
+                "2017-04-18 01:00/purple/-ok-/2017-04-18 03:00",
+                "2017-04-18 17:00/purple/-ok-/2017-04-18 18:00",
+                "2017-04-19 06:00/purple/- turned back on for 15 min -/2017-04-19 08:00",
+                "2017-04-19 20:00/purple/-ok-/2017-04-19 21:00",
+                "2017-04-20 13:25/purple/- not hourly aligned -/2017-04-20 14:30",
+                "2017-04-22 08:00/purple/- missed? -/2017-04-22 09:00",
+                "2017-04-22 20:30/purple/- not hourly aligned -/2017-04-22 21:30",
+                "2017-04-23 06:00/purple/-ok-/2017-04-23 07:00",
+                "2017-04-23 19:00/purple/-ok-/2017-04-23 20:00")
+
+smcb1sdate <- as.POSIXct("2017-03-08",tz=tzbk)
+smcb1edate <- smcb1sdate+14*24*3600
+
+smcb2sdate <- as.POSIXct("2017-04-17",tz=tzbk)
+smcb2edate <- smcb2sdate+8*24*3600
+
+totdates <- c(smcb1dates,smcb2dates)
+
+smcback <- "lightsteelblue1"
+xbxback <- "darkseagreen2"
+xabback <- "darkseagreen3"
+totback <- "wheat"
+
+fpath <- "TorontoData1"
+sdate <- as.POSIXct("2017-02-01",tz=tztz)
+edate <- as.POSIXct("2017-04-24",tz=tztz)
+```
+
+#### Misc utility functions
+
+```{r}
+
+s2date <- function(strdate){
+  return(as.POSIXct(strdate,tz=tzbk))
+}
+crackdate <- function(datestr){
+  sar <- unlist(strsplit(datestr,"/"))
+  ssdate <- sar[[1]]
+  sdate <- s2date(ssdate)
+  shdate <- round_to_hour(sdate)
+  if (length(sar)>=4){
+    sedate <- sar[[4]]
+    edate <- s2date(sedate)
+    ehdate <- round_to_hour(edate)
+  } else {
+    sedate <- NULL
+    edate <- NULL
+  }
+  val <- 0
+  sval <- sar[[3]]
+  levpart <- sar[[3]]
+  pctpresent <- F
+  if (grepl("%",levpart)){
+    if (grepl("-",levpart)){
+      levpart <- gsub("%","",levpart)
+      val <- as.numeric(unlist(strsplit(levpart,"-"))[[2]])
+      sval <- gsub("-","_",levpart)
+      pctpresent <- T
+    }
+  }
+  return(list(sdate=sdate,ssdate=ssdate,edate=edate,sedate=sedate,val=val,sval=sval,pctpresent=pctpresent,shdate=shdate,ehdate=ehdate))
+}
+
+addStepDateToVek <- function(dates,idx,dtvek,vvek){
+  cd1 <- crackdate(dates[[idx]])
+  if (!cd1$pctpresent){
+    # if there is no % don't do anything
+    return(vvek)
+  }
+  dt1 <- cd1$date
+  if (idx<length(dates)){
+    cd2 <- crackdate(dates[[idx+1]])
+    dt2 <- cd2$sdate
+  } else {
+    dt2 <- max(dtvek)
+  }
+  #print("addstepdate")
+  #print(dt1)
+  #print(dt2)
+  val <- cd1$val
+  tochg <-  dt1<=dtvek & dtvek<= dt2
+  vvek[ tochg ] <- val
+  #print(sprintf("changed %d values to %d",sum(tochg),val))
+  return(vvek)
+}
+getStepDates <- function(dates,dtvek){
+ vvek <- rep(0,length(dtvek))
+ for (i in 1:length(dates)){
+   vvek <- addStepDateToVek(dates,i,dtvek,vvek)
+ }
+ return(vvek)
+}
+getSmcStepDates <- function(dtvek){
+ return(getStepDates(smcdates,dtvek))
+}
+getXabStepDates <- function(dtvek){
+ return(getStepDates(totdates,dtvek))
+}
+```
+
+
+#### Plot Functions
+
+Plots created using ggplot2
+
+
+```{r}
+addVlines2AndText <- function(vlines,gp,hjust=0){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab","dt2")
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tzbk)
+  ldf$fdt <- format(ldf$dt,format="%Y-%m-%d   %H%:%M %Z")
+  ldf$ndt <- as.numeric(ldf$dt)
+  ldf$dt2 <- as.POSIXct(ldf$dt2,tz=tzbk)
+  ldf$fdt2 <- format(ldf$dt2,format="%Y-%m-%d   %H%:%M %Z")
+  ldf$ndt2 <- as.numeric(ldf$dt2)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+
+  olab <- ldf$lab
+  ldf$lab <- sprintf("\n%s  %s",ldf$fdt,olab)
+  ldf$lab2 <- sprintf("\n%s  %s",ldf$fdt2,olab)
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) + geom_vline(xintercept=ldf$ndt2,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=hjust,angle=90,na.rm=T) +
+             annotate(geom="text",x=ldf$dt2,y=0,label=ldf$lab2,color=ldf$clr,hjust=hjust,angle=90,na.rm=T)
+  return(gp)
+}
+addVlinesAndText <- function(vlines,gp,hjust=0){
+  if (is.null(vlines)) return(gp) # do nothing in this case
+  
+  # split the lines and convert to data.frame
+  sar <- strsplit(vlines,"/")
+  # the following reforms the date strings into a data.frame for geom_vline
+  ldf <- data.frame(t(matrix(unlist(sar),length(sar[[1]]),length(sar)))) #tricky
+  names(ldf) <- c("dt","clr","lab")
+  ldf$dt <- as.POSIXct(ldf$dt,tz=tzbk)
+  ldf$ndt <- as.numeric(ldf$dt)
+  # add a newline to the front so as to display the text 
+  # this keeps the text from writing on top of the vline
+  
+  ldf$lab <- paste0("\n",ldf$lab) 
+  # now actually add the verticle lines and the text 
+  gp <- gp + geom_vline(xintercept=ldf$ndt,color=ldf$clr) +
+             annotate(geom="text",x=ldf$dt,y=0,label=ldf$lab,color=ldf$clr,hjust=hjust,angle=90,na.rm=T)
+  return(gp)
+}
+addBackground <- function(backg,gp){
+  if (is.null(backg)) return(gp) # do nothing in this case
+  gp <- gp + theme(panel.background = element_rect(fill = backg))
+  return(gp)
+}
+overdate <- function(ovdate,defdate){
+  # date override
+  rv <- defdate
+  if (!is.null(ovdate)) { 
+    rv <- ovdate
+  }
+  return(rv)
+}
+dailyplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,vlines2=NULL,backg=NULL,series=NULL,clrs=NULL,
+                      hjust=0,rotxaxtxt=0,ovsdate=NULL,ovedate=NULL,dfmt="%Y-%m-%d",addpoints=F,customscale=T){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  if (customscale){
+    ddf <- ddf %>% filter( dpsdate<=dt & dt<=dpedate )
+  }
+  
+  
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_line(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks("1 days"),
+                              limits=c(dpsdate,dpedate),date_label=dfmt)
+
+  if (addpoints){
+    gp <- gp + geom_point(aes_string(color=series),na.rm=T)
+  }
+  if (!is.null(clrs)){
+    gp <- gp + scale_color_manual(values=clrs)
+  }
+  gp <- addVlinesAndText(vlines,gp,hjust=hjust)
+  gp <- addVlines2AndText(vlines2,gp,hjust=hjust)
+
+  gp <- addBackground(backg,gp)
+  
+  if (rotxaxtxt!=0){
+    gp <- gp + theme(axis.text.x = element_text(angle = rotxaxtxt, hjust = 0))
+  }
+
+  return(gp)
+}
+residplot <- function(ddf,x,y,mtit="",xlab="date",ylab=NULL,vlines=NULL,backg=NULL,series=NULL,ovsdate=NULL,ovedate=NULL){
+  # Single series plot  with monthly breaks on the x-axis
+  
+  # override dates if needed
+  dpsdate <- overdate(ovsdate,sdate)
+  dpedate <- overdate(ovedate,edate)
+  
+  brkctrl <- "1 month"
+  dltdays <- difftime(dpedate,dpsdate,"days") 
+  if (dltdays<30) brkctrl <- "1 day"
+  
+  gp <- ggplot(ddf,aes_string(x=x,y=y)) + 
+             geom_point(aes_string(color=series),na.rm=T)  +
+             xlab(xlab) + ylab(ylab) + ggtitle(mtit) +
+             scale_x_datetime("Date",breaks = date_breaks(brkctrl),limits=c(dpsdate,dpedate)) +
+             theme(axis.text.x = element_text(angle = -30, hjust = 0))
+
+  gp <- addVlinesAndText(vlines,gp)
+
+  gp <- addBackground(backg,gp)
+  
+  hp <- ggplot(ddf) + geom_histogram(aes_string(x=y),bins=30)
+  hp <- addBackground(backg,hp)
+  
+  ghp <- grid.arrange(gp, hp, ncol=2,widths = c(2,1))
+
+  return(ghp)
+}
+```
+## Read in consolidated chat, call, and session volume data
+
+```{r}
+stload <- Sys.time()
+tfname <- sprintf("%s/%s",fpath,"consolidatedEarly2017TorontoData01.csv")
+condf <- read.csv(tfname)
+
+# minsessfilt <- 5000
+# nbef <- nrow(condf)
+# condf <- condf %>% filter(minsessfilt<actsess)
+# naft <- nrow(condf)
+# print(sprintf("Filtered %d of %d hours because sessions less than %d",(nbef-naft),naft,minsessfilt))
+condf <- condf %>% mutate( dt = as.POSIXct(dt,tz=tztz) ) %>%
+                   mutate( log_winchib = log(winchib) ) %>%
+                   mutate( log_wincall = log(wincall) ) %>%
+                   mutate( log_xbxchib = log(xbxchib) ) %>%
+                   mutate( log_xbxcall = log(xbxcall) ) %>%
+                   mutate( rate_winchib = winchib/actsess ) %>%
+                   mutate( rate_wincall = wincall/actsess ) %>%
+                   mutate( rate_xbxchib = xbxchib/actsess ) %>%
+                   mutate( rate_xtkchib = xtkchib/actsess ) %>%
+                   mutate( rate_xabchib = xabchib/actsess ) %>%
+                   mutate( rate_xbxcall = xbxcall/actsess ) %>%
+                   mutate( rate_xtkcall = xtkcall/actsess ) %>%
+                   mutate( rate_xabcall = xabcall/actsess ) %>%
+                   mutate( xbxchibdiff = xabchib-xtkchib ) %>%
+                   mutate( xbxcalldiff = xabcall-xtkcall ) %>%
+                   mutate( rate_xbxchibdiff = rate_xabchib-rate_xtkchib ) %>%
+                   mutate( rate_xbxcalldiff = rate_xabcall-rate_xtkcall ) 
+
+# dcondf <- condf %>% group_by(dnum) %>% summarise(dt=min(dt),
+#                                                  totchib=sum(totchib),winchib=sum(winchib),xbxchib=sum(xbxchib),
+#                                                  totcall=sum(totcall),wincall=sum(wincall),xbxcall=sum(xbxcall),
+#                                                  actsess=sum(actsess),actuser=sum(actuser)
+#                                                  )
+
+elap <- as.numeric((Sys.time()-stload)[1],units="secs")
+print(sprintf("Loading consolidated data took %.1f secs",elap))
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,chib,-dt) %>% filter(series %in% c("totchib","winchib","xbxchib"))
+dailyplot(pltdf,"dt","chib",series="series",mtit="Chats In Block",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,call,-dt) %>% filter(series %in% c("totcall","wincall","xbxcall"))
+dailyplot(pltdf,"dt","call",series="series",mtit="Calls",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+```{r fig.width=14, fig.height=6, echo=T}
+pltdf <- condf %>% gather(series,active,-dt) %>% filter(series %in% c("actsess","actuser"))
+dailyplot(pltdf,"dt","active",series="series",mtit="Sessions",ylab="Sum",vlines=totdates,backg=totback,rotxaxtxt=-30)
+```
+
+## regression code
+
+```{r}
+
+getregdf <- function(df,dates,befdays,aftdays){
+  sdate <- NA
+  edate <- NA
+  for (scrk in dates){
+    crk <- crackdate(scrk)
+    sdate <- min(crk$shdate,sdate,na.rm=T)
+    edate <- max(crk$ehdate,edate,na.rm=T)
+  }
+
+
+  sregdate <- sdate - days(befdays)
+  eregdate <- edate + days(aftdays)
+  
+  print(sprintf("getregdf2 - sdate:%s edate:%s sregdate:%s eregdate:%s",
+                             sdate,edate,sregdate,eregdate))
+
+  
+  df <- df %>% filter( sregdate <= dt & dt <= eregdate) 
+  
+  df <- df %>% mutate( hour=as.factor(hour(dt)) ) %>%
+               mutate( dow=as.factor(wday(dt))) %>%  
+               mutate( idx=1:nrow(df) ) %>%
+               mutate( lin0=1 ) 
+  
+  df <- df[complete.cases(df),]
+
+  return(df)
+}
+
+formlist = list(
+  formel1="%s ~ hour + dow + lin1 + lin2 + postchange",
+  formel2a="%s ~ hour * dow - 1",
+  formel2b="%s ~ lin1 + lin2 + postchange",
+  formel2c="%s ~ D1 + D2 + DD"
+#  formel2b="%s ~ lin0 + postchange"
+)
+doregressiondid <- function(df,vname,formel,dates,befdays,aftdays,verbosetxt=1){
+
+
+  formstr <- sprintf(formlist[[formel]],vname)
+  form <- as.formula(formstr)
+  fit <- glm(form,data=df)
+  summary_fit <- summary(fit)
+  coeftest_fit <- coeftest(fit, vcov = vcovHC(fit, "HC1"))
+  if (verbosetxt>1){
+    print(summary_fit)
+  }
+  if (verbosetxt>0){
+    print(coeftest_fit)
+  }
+  df$resid <- resid(fit)
+#  df$predicted <-  df[[vname]]-df$resid
+  df$predicted <-  predict(fit,df)
+  # for debugging
+  # ffit <<- fit
+  # sfit <<- summary_fit
+  # cfit <<- coeftest_fit
+  return(list(df=df,formstr=formstr,fit=fit,sfit=summary_fit,cfit=coeftest_fit))
+}
+```
+
+```{r}
+
+#rdf2 <- getregdfdid(df2,vname,vname2,vname2,dates)
+getregdfdid <- function(odf,vname,vname1,vname2,dates){
+
+  df <- odf[c("dt",vname1,vname2)]
+  df <- df %>% gather(series,vname,-dt)
+  df[vname] <- df$vname
+  df$vname <- NULL
+  
+  df <- df  %>% mutate( D1 = ifelse(series==vname2,1L,0L) ) %>%
+                mutate( D2 = 0 ) %>%
+                mutate( idx = 1:nrow(df) )
+  df$series <- NULL
+
+  for (scrk in dates){
+    crk <- crackdate(scrk)
+    scutidx <- which(df$dt==crk$shdate)
+    ecutidx <- which(df$dt==crk$ehdate)
+    if (length(scutidx)>0 & length(ecutidx)>0){
+      df <- df %>% mutate( nD2 = if_else(scutidx<=idx & idx<=ecutidx,1L,0L) )  %>%
+                   mutate( D2 = nD2 + D2 )
+    }
+  }
+  df$nD2 <- NULL
+  df <- df %>% mutate( DD = D1*D2 )
+  return(df)
+}
+
+
+regress2did <- function(df,vname1,vname2,area,backg,dates,mtit1,befdays=7,aftdays=7,model="model2"){
+
+  idx <- 1
+  
+  # step 1
+  verbosetxt <- 1
+  rdf <- getregdf(df,dates,befdays,aftdays)
+  rv1.1 <- doregressiondid(rdf,vname1,"formel2a",dates,befdays,aftdays,verbosetxt)
+  if (verbose>0){
+    df1 <- rv1.1$df %>%  gather_("series",vname1,c(vname1,"predicted"))
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv1.1$formstr)
+    idx <- idx+1
+    plt <- dailyplot(df1,"dt",vname1,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    suppressWarnings(print(plt))
+    mtit <- sprintf("%d - Step 1 Residuals - %s - %s",idx,mtit1,rv1.1$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+  rv1.2 <- doregressiondid(rdf,vname2,"formel2a",dates,befdays,aftdays,verbosetxt)
+  if (verbose>0){
+    df1 <- rv1.2$df %>%  gather_("series",vname2,c(vname2,"predicted"))
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv1.2$formstr)
+    idx <- idx+1
+    plt <- dailyplot(df1,"dt",vname2,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    suppressWarnings(print(plt))
+    mtit <- sprintf("%d - Step 1 Residuals - %s - %s",idx,mtit1,rv1.2$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+
+  # step 2
+  df2 <- rv1.1$df
+  df2$step1residuals1 <- rv1.1$fit$residuals
+  df2$step1residuals2 <- rv1.2$fit$residuals
+  vname1 <- "step1residuals1"
+  vname2 <- "step1residuals2"
+  vname  <- "step1residuals"
+  
+  
+  rdf2 <- getregdfdid(df2,vname,vname1,vname2,dates)
+  rv2 <- doregressiondid(rdf2,vname,"formel2c",dates,7,7)
+  if (verbose>0){
+    df1 <- rv2$df %>%  gather_("series",vname,c(vname,"predicted"))
+    idx <- idx+1
+
+    mtit <- sprintf("%d - %s - %s",idx,mtit1,rv2$formstr)
+    plt <- dailyplot(df1,"dt",vname,series="series",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt),rotxaxtxt=-30)
+    suppressWarnings(print(plt))
+    mtit <- sprintf("%d - Step 2 Residuals - %s - %s",idx,mtit1,rv2$formstr)
+    plt <- residplot(df1,"dt","resid",mtit,ylab="Sum",
+                     vlines=dates,backg=backg,ovsdate=min(df1$dt),ovedate=max(df1$dt))
+  }
+  rescoef <- "DD"
+}
+```
+
+
+## XBox Chats
+
+```{r fig.width=14, fig.height=6, echo=T}
+options(warn=-1) # get rid of timezone warnings
+verbose <- 2
+tzbk <- "US/Pacific"
+
+regress2did(condf,"xtkchib","xabchib","Xbox",xbxback,totdates,"Xbpx",befdays=14,aftdays=14) 
+```
+
+## XBox Calls
+
+```{r fig.width=14, fig.height=6, echo=T}
+regress2did(condf,"xtkcall","xabcall","Xbox",xbxback,totdates,"Xbpx",befdays=14,aftdays=14) 
+```
+
+## XBox Chat Rates
+
+```{r fig.width=14, fig.height=6, echo=T}
+regress2did(condf,"rate_xtkchib","rate_xabchib","Xbox",xbxback,totdates,"Xbpx",befdays=14,aftdays=14) 
+```
+
+# XBox Call Rates
+
+```{r fig.width=14, fig.height=6, echo=T}
+regress2did(condf,"rate_xtkcall","rate_xabcall","Xbox",xbxback,totdates,"Xbpx",befdays=14,aftdays=14) 
+```
+
+## Done
+
+```{r echo=F}
+elap <- as.numeric((Sys.time()-starttime)[1],units="secs")
+print(sprintf("%s created on %s took %.1f secs",versionstring,startfmttime,elap))
+```
