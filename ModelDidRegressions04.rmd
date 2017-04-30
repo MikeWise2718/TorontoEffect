@@ -311,6 +311,10 @@ condf <- condf %>% mutate( dt = as.POSIXct(dt,tz=tztz) ) %>%
                    mutate( rate_xtkcall = xtkcall/actsess ) %>%
                    mutate( rate_xabcall = xabcall/actsess ) 
 
+condf$dt.call <- NULL
+condf$dt.chat <- NULL
+condf$dnum.call <- NULL
+condf$dnum.chat <- NULL
 
 dcondf <- condf %>% group_by(dnum) %>% summarise(dt=min(dt),
                                                  totchib=sum(totchib),winchib=sum(winchib),xbxchib=sum(xbxchib),
@@ -501,10 +505,12 @@ regressdid <- function(df,vname,vname_ctr,vname_trt,dates,chgdate,
   crk <- crackdate(chgdate)
   newresults <- list(var=vname,
                      title=mtit1,
+                     formula=rv$formstr,
+                     vctrl=vname_ctr,
+                     vtreat=vname_trt,
                      chgDate=crk$sdate,
                      chgVal=crk$sval,
                      model=model,
-                     formula=rv$formstr,
                      chgCoef.fit=rv$fit$coefficients["DD"],
                      chgCoef.smry=rv$sfit$coefficients["DD",1],
                      chgStd.smry=rv$sfit$coefficients["DD",2],
@@ -522,8 +528,8 @@ regressoverdatesdid <- function(model,df,vname,vname_ctr,vname_trt,area,title,be
   atit <- sprintf("%s - %s",area,title)
   for (chgdate in dates){
     switch(model,
-    "model-did"=regressdid(condf,vname,vname_ctr,vname_trt,dates,chgdate,
-                                  area,backg,atit,befdays=befdays,aftdays=aftdays)
+    "model-did"=regressdid(df,vname,vname_ctr,vname_trt,dates,chgdate,
+                                area,backg,atit,befdays=befdays,aftdays=aftdays)
     )
   }
 }
@@ -534,6 +540,11 @@ regressoverdatesdid <- function(model,df,vname,vname_ctr,vname_trt,area,title,be
 initResults()
 
 justdoone <- F
+
+# dump evertyhing but the date column (it is too wide)
+sdf <- condf
+sdf$dt <- NULL
+t(summary(sdf))
 
 # we just want DID with Xbox
 m <- "model-did"
@@ -565,7 +576,7 @@ starval <- function(val){
 }
 
 df <- getResults1()
-kdf <- df[,c("idx","title","formula","chgDate","chgVal","chgCoef.fit","chgCoef.smry","chgStd.smry","chgZval.cfit","chgPval.cfit")]
+kdf <- df[,c("idx","title","formula","vctrl","vtreat","chgDate","chgVal","chgCoef.fit","chgCoef.smry","chgStd.smry","chgZval.cfit","chgPval.cfit")]
 kdf$formula <- sprintf(".   %s",kdf$formula)
 kdf$chgDate <- sprintf(".   %s  .",kdf$chgDate)
 kdf$chgVal  <- sprintf(".   %s",kdf$chgVal)
